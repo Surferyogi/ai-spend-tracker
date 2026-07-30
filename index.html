@@ -132,7 +132,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 <header>
   <div>
     <h1>AI Spend Tracker</h1>
-    <div class="ver" id="ver">v2026:07:30-12:51</div>
+    <div class="ver" id="ver">v2026:07:30-14:26</div>
   </div>
   <div class="row">
     <button class="btn sm" onclick="exportJSON()">Export</button>
@@ -293,7 +293,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 
 <script>
 "use strict";
-const VERSION = "v2026:07:30-12:51";
+const VERSION = "v2026:07:30-14:26";
 const KEY = "ai-spend-tracker-v1";
 
 /* ---------- seeded data: every figure below was read off a receipt or a console page ---------- */
@@ -527,7 +527,7 @@ function render(){
       <div class="note">over ${days} days${anyAssumed?` · confirmed only ${fmt(totV/days,"SGD")}`:""}</div></div>`;
 
   const nU = S.filter(e=>!e.verified).length;
-  const stated = S.filter(e=>e.verified && /Confirmed constant/i.test(e.src||""));
+  const stated = S.filter(e=>e.verified && /Confirmed constant|stated fixed price/i.test(e.src||""));
   const statedSum = sumSgd(stated);
   const statedNote = stated.length
     ? ` <b>${stated.length} of them rest on your word, not a receipt:</b> ${stated.length===1?"it is":"they are"} recorded at a stated fixed price (${fmt(statedSum,"SGD")}) because you confirmed the figure — no receipt email exists to check against. If the price ever changes, nothing here will catch it.`
