@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI Spend Tracker</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AI Spend">
+<meta name="theme-color" content="#0f1115">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="manifest" href="manifest.json">
+<style>
+:root{
+  --bg:#0f1115; --panel:#171a21; --panel2:#1d212a; --line:#272c37;
+  --tx:#e7e9ee; --tx2:#9aa2b1; --tx3:#6b7382;
+  --accent:#e8975a; --ok:#5ec89a; --warn:#e0b341; --bad:#e2695f; --info:#6fa8dc;
+  --sgd:#7aa2f7; --usd:#9ece6a;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--tx);
+  font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif;
+  padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.wrap{max-width:1080px;margin:0 auto;padding:16px 14px 90px}
+header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:4px;flex-wrap:wrap}
+h1{font-size:19px;margin:0;letter-spacing:-.2px}
+.ver{font-size:11px;color:var(--tx3);font-variant-numeric:tabular-nums;margin-top:3px}
+.sub{color:var(--tx2);font-size:12.5px;margin:2px 0 16px}
+.btn{
+  background:var(--panel2);color:var(--tx);border:1px solid var(--line);
+  border-radius:9px;padding:8px 12px;font-size:13px;cursor:pointer;font-family:inherit
+}
+.btn:hover{border-color:#3a4152}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#1a1206;font-weight:600}
+.btn.sm{padding:5px 9px;font-size:12px}
+.btn.danger{color:var(--bad)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:13px 14px}
+.card .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--tx3);margin-bottom:7px}
+.card .val{font-size:23px;font-weight:650;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
+.card .val.sgd{color:var(--sgd)} .card .val.usd{color:var(--usd)}
+.card .note{font-size:11.5px;color:var(--tx3);margin-top:5px}
+
+.tabs{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:4px;margin-bottom:14px;overflow-x:auto}
+.tab{flex:1;min-width:88px;text-align:center;padding:8px 10px;border-radius:8px;font-size:13px;color:var(--tx2);cursor:pointer;white-space:nowrap}
+.tab.on{background:var(--panel2);color:var(--tx);font-weight:600}
+
+section{display:none} section.on{display:block}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:14px;margin-bottom:12px}
+.panel h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--tx3);margin:0 0 12px;font-weight:600}
+
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--tx3);font-weight:600;padding:0 8px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 8px;border-bottom:1px solid #1f232c;vertical-align:top}
+tr:last-child td{border-bottom:none}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tfoot td{font-weight:650;border-top:1px solid var(--line);border-bottom:none;padding-top:10px}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+.pill{display:inline-block;font-size:10.5px;padding:2px 7px;border-radius:20px;border:1px solid;white-space:nowrap}
+.pill.v{color:var(--ok);border-color:#2c5a46;background:#132a21}
+.pill.u{color:var(--warn);border-color:#5c4c1c;background:#2a2413}
+.pill.r{color:var(--info);border-color:#2b4a63;background:#12222e}
+.cur{font-size:10.5px;color:var(--tx3);margin-left:3px}
+.neg{color:var(--bad)}
+
+.bars{display:flex;flex-direction:column;gap:9px}
+.bar{display:grid;grid-template-columns:104px 1fr 96px;gap:10px;align-items:center;font-size:12.5px}
+.bar .track{height:22px;background:var(--panel2);border-radius:5px;overflow:hidden;display:flex}
+.bar .seg{height:100%}
+.bar .amt{text-align:right;font-variant-numeric:tabular-nums;color:var(--tx2)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--tx2);margin-top:12px}
+.dot{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+
+label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--tx3);margin-bottom:5px}
+input,select,textarea{
+  width:100%;background:var(--bg);border:1px solid var(--line);color:var(--tx);
+  border-radius:8px;padding:9px 10px;font:inherit;font-size:13.5px
+}
+textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px;margin-bottom:12px}
+.chk{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--tx2);text-transform:none;letter-spacing:0}
+.chk input{width:auto}
+
+.note-box{background:#141821;border:1px solid var(--line);border-left:3px solid var(--warn);border-radius:8px;padding:11px 13px;font-size:12.5px;color:var(--tx2);margin-bottom:12px}
+.note-box b{color:var(--tx)}
+.src{font-size:11.5px;color:var(--tx3);line-height:1.7}
+.src b{color:var(--tx2)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 16px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:99}
+.toast.on{opacity:1}
+.empty{color:var(--tx3);font-size:13px;text-align:center;padding:22px}
+@media(max-width:560px){
+  .bar{grid-template-columns:82px 1fr 84px;font-size:11.5px}
+  td,th{padding-left:5px;padding-right:5px}
+  table{font-size:12.5px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1>AI Spend Tracker</h1>
+    <div class="ver" id="ver">v2026:07:29-22:39</div>
+  </div>
+  <div class="row">
+    <button class="btn sm" onclick="exportJSON()">Export</button>
+    <button class="btn sm" onclick="document.getElementById('imp').click()">Import</button>
+    <input type="file" id="imp" accept=".json" style="display:none" onchange="importJSON(this)">
+  </div>
+</header>
+<div class="sub">Historical + ongoing cost tracking. SGD and USD are never mixed — no exchange rate is applied anywhere.</div>
+
+<div class="cards" id="cards"></div>
+
+<div class="tabs">
+  <div class="tab on" data-t="overview">Overview</div>
+  <div class="tab" data-t="monthly">Monthly</div>
+  <div class="tab" data-t="entries">Entries</div>
+  <div class="tab" data-t="add">Add</div>
+  <div class="tab" data-t="data">Data</div>
+</div>
+
+<!-- OVERVIEW -->
+<section id="overview" class="on">
+  <div class="note-box" id="unverifiedNote"></div>
+
+  <div class="panel">
+    <h2>By vendor</h2>
+    <div id="byVendor"></div>
+  </div>
+
+  <div class="panel">
+    <h2>By category</h2>
+    <div class="scroll"><table id="byCat"></table></div>
+  </div>
+
+  <div class="panel">
+    <h2>Run rate</h2>
+    <div class="scroll"><table id="runRate"></table></div>
+  </div>
+
+  <div class="panel">
+    <h2>Where these numbers came from</h2>
+    <div class="src">
+      <b>Scanned</b> — receipt emails parsed by the AI Spend Scanner Apps Script and imported as JSON. Each row's source line carries its own receipt or order number.<br>
+      <b>Manual</b> — charges with no receipt email, e.g. subscription renewals when renewal receipts are switched off. The source line states what the figure rests on.<br>
+      <b>API consumption</b> — read from the provider console. It is drawdown against prepaid credit, not a payment, and is never counted as spend.<br>
+      <b>Rule</b> — <span class="pill v">verified</span> means a receipt or an explicit confirmation exists; <span class="pill u">assumed</span> means a projection at the last known price. Read the source line before trusting a total.
+    </div>
+  </div>
+</section>
+
+<!-- MONTHLY -->
+<section id="monthly">
+  <div class="panel">
+    <h2>Month by month</h2>
+    <div class="scroll"><table id="monTable"></table></div>
+  </div>
+  <div class="panel">
+    <h2>Monthly SGD, by category</h2>
+    <div class="bars" id="monBars"></div>
+    <div class="legend" id="monLegend"></div>
+  </div>
+  <div class="panel">
+    <h2>API consumption vs credits bought (USD)</h2>
+    <div class="scroll"><table id="apiTable"></table></div>
+  </div>
+</section>
+
+<!-- ENTRIES -->
+<section id="entries">
+  <div class="panel">
+    <h2>All entries</h2>
+    <div class="row" style="margin-bottom:12px">
+      <select id="fVendor" onchange="render()" style="width:auto"><option value="">All vendors</option></select>
+      <select id="fVerif" onchange="render()" style="width:auto">
+        <option value="">Verified + assumed</option>
+        <option value="v">Verified only</option>
+        <option value="u">Assumed only</option>
+      </select>
+    </div>
+    <div class="scroll"><table id="entTable"></table></div>
+  </div>
+</section>
+
+<!-- ADD -->
+<section id="add">
+  <div class="panel">
+    <h2 id="formTitle">Add an entry</h2>
+    <input type="hidden" id="fId">
+    <div class="grid">
+      <div><label>Date</label><input type="date" id="fDate"></div>
+      <div><label>Vendor</label><input id="fVend" list="vendors" placeholder="Vendor"><datalist id="vendors"></datalist></div>
+      <div><label>Category</label><select id="fCat">
+        <option>Subscription</option><option>Usage credits</option><option>API credits</option><option>Refund</option><option>Other</option>
+      </select></div>
+      <div><label>Currency</label><select id="fCur"><option>SGD</option><option>USD</option></select></div>
+      <div><label>Gross amount (incl. tax)</label><input type="number" step="0.01" id="fGross" placeholder="0.00"></div>
+      <div><label>Tax included</label><input type="number" step="0.01" id="fTax" placeholder="0.00"></div>
+    </div>
+    <div style="margin-bottom:12px"><label>Description</label><input id="fDesc" placeholder="Subscription name"></div>
+    <div style="margin-bottom:12px"><label>Source / reference</label><input id="fSrc" placeholder="Receipt or order reference"></div>
+    <div class="row" style="margin-bottom:14px">
+      <label class="chk"><input type="checkbox" id="fVer" checked> Receipt verified</label>
+      <label class="chk"><input type="checkbox" id="fRec"> Recurring monthly</label>
+    </div>
+    <div class="row">
+      <button class="btn pri" onclick="saveEntry()">Save entry</button>
+      <button class="btn" onclick="resetForm()">Clear</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Project future charges</h2>
+    <p class="src" style="margin:0 0 12px">Generates monthly entries from every recurring subscription, marked <span class="pill u">assumed</span> until you confirm each receipt.</p>
+    <div class="grid">
+      <div><label>Project through</label><input type="month" id="projTo"></div>
+    </div>
+    <button class="btn" onclick="project()">Generate projections</button>
+  </div>
+</section>
+
+<!-- DATA -->
+<section id="data">
+  <div class="panel">
+    <h2>Monthly scan workflow</h2>
+    <p class="src" style="margin:0 0 12px">
+      The <b>AI Spend Scanner</b> Apps Script runs in each Gmail account on the 1st of the month and emails you a JSON attachment.
+      Save it, then <b>Import</b> below. Import is <b>additive</b>: it matches on receipt number (or date + vendor + amount),
+      adds only what is genuinely new, and never touches an existing row or a verification tick you have set.
+      It shows you exactly what it will add before adding anything.
+    </p>
+    <div class="row">
+      <button class="btn pri" onclick="document.getElementById('imp').click()">Import scan (merge)</button>
+      <button class="btn" onclick="exportJSON()">Export JSON</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Backup &amp; reset</h2>
+    <p class="src" style="margin:0 0 12px">Entries live in this browser's localStorage. Clearing site data wipes them — export regularly. The JSON re-imports on any device.</p>
+    <div class="row">
+      <button class="btn" onclick="document.getElementById('rep').click()">Replace all from file</button>
+      <input type="file" id="rep" accept=".json" style="display:none" onchange="replaceAll(this)">
+      <button class="btn" onclick="seedReset()">Restore seeded data</button>
+      <button class="btn danger" onclick="wipe()">Delete everything</button>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Raw JSON</h2>
+    <textarea id="raw" rows="14" spellcheck="false"></textarea>
+    <div class="row" style="margin-top:10px"><button class="btn" onclick="applyRaw()">Apply edits</button></div>
+  </div>
+</section>
+
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const VERSION = "v2026:07:29-22:39";
+const KEY = "ai-spend-tracker-v1";
+
+/* ---------- seeded data: every figure below was read off a receipt or a console page ---------- */
+function seed(){
+  /* Deliberately empty. This copy is published to a PUBLIC GitHub Pages site,
+     so no financial data is baked in. Load your figures on each device:
+     Data -> Import scan (merge) -> your exported JSON. Keep that file off GitHub. */
+  return [];
+}
+
+/* API consumption read from Claude Console → Cost (not a charge; drawn from prepaid credit) */
+const API_USE = [
+  /* Console API consumption has no receipts. Add rows here, or leave empty.
+     Shape: {m:'YYYY-MM', total:0, token:0, web:0, note:''} */
+];
+const API_BALANCE = 0;
+
+/* ---------- state ---------- */
+let S = load();
+function load(){
+  try{ const r = localStorage.getItem(KEY); if(r){ const p = JSON.parse(r); if(Array.isArray(p)&&p.length) return p; } }
+  catch(e){ console.warn("load failed", e); }
+  return seed();
+}
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(S)); }
+  catch(e){ toast("Could not save — storage unavailable"); }
+}
+
+/* ---------- helpers ---------- */
+const fmt = (n,c)=> (n<0?"-":"") + (c==="SGD"?"S$":"US$") + Math.abs(n).toLocaleString("en-SG",{minimumFractionDigits:2,maximumFractionDigits:2});
+const ym  = d => d.slice(0,7);
+const monthName = m => new Date(m+"-01T00:00:00").toLocaleDateString("en-GB",{month:"short",year:"numeric"});
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("on"); setTimeout(()=>t.classList.remove("on"),2200); }
+function sum(arr,f){ return arr.reduce((a,b)=>a+f(b),0); }
+function round2(n){ return Math.round(n*100)/100; }
+
+const CATCOL = {"Subscription":"#7aa2f7","Usage credits":"#e8975a","API credits":"#9ece6a","Refund":"#e2695f","Other":"#8b93a5"};
+
+function filtered(){
+  const v = document.getElementById("fVendor").value;
+  const q = document.getElementById("fVerif").value;
+  return S.filter(e => (!v || e.vendor===v) && (!q || (q==="v"?e.verified:!e.verified)));
+}
+
+/* ---------- render ---------- */
+function render(){
+  document.getElementById("ver").textContent = VERSION;
+  const sgd = S.filter(e=>e.cur==="SGD"), usd = S.filter(e=>e.cur==="USD");
+  const sgdV = sum(sgd.filter(e=>e.verified), e=>e.gross);
+  const sgdA = sum(sgd, e=>e.gross);
+  const usdV = sum(usd.filter(e=>e.verified), e=>e.gross);
+  const usdA = sum(usd, e=>e.gross);
+
+  const dates = S.map(e=>e.date).sort();
+  const today = new Date().toISOString().slice(0,10);
+  // dates[0] is undefined on an empty ledger — without this the day count is NaN.
+  const first = dates[0] || today, last = today;
+  const days = Math.max(1, Math.round((new Date(last)-new Date(first))/864e5)+1);
+
+  const anyAssumed = Math.abs(sgdA - sgdV) > 0.005;
+  const recMo = sum(S.filter(e=>e.recurring && e.cur==="SGD"), e=>e.gross);
+  const since = new Date(first).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+
+  document.getElementById("cards").innerHTML = `
+    <div class="card"><div class="lbl">SGD — ${anyAssumed ? "confirmed" : "total"}</div>
+      <div class="val sgd">${fmt(anyAssumed ? sgdV : sgdA,"SGD")}</div>
+      <div class="note">since ${since}</div></div>
+
+    ${anyAssumed
+      ? `<div class="card"><div class="lbl">SGD — incl. assumed</div><div class="val sgd">${fmt(sgdA,"SGD")}</div>
+           <div class="note">+${fmt(sgdA-sgdV,"SGD")} unconfirmed</div></div>`
+      : `<div class="card"><div class="lbl">Committed / month</div><div class="val sgd">${fmt(recMo,"SGD")}</div>
+           <div class="note">${fmt(recMo*12,"SGD")} a year if unchanged</div></div>`}
+
+    <div class="card"><div class="lbl">USD — total</div><div class="val usd">${fmt(usdA,"USD")}</div>
+      <div class="note">API credits bought${usdA!==usdV?" · incl. assumed":""}</div></div>
+
+    <div class="card"><div class="lbl">SGD per day</div><div class="val">${fmt(sgdA/days,"SGD")}</div>
+      <div class="note">over ${days} days${anyAssumed?` · confirmed only ${fmt(sgdV/days,"SGD")}`:""}</div></div>`;
+
+  const nU = S.filter(e=>!e.verified).length;
+  const stated = S.filter(e=>e.verified && /Confirmed constant/i.test(e.src||""));
+  const statedSum = sum(stated.filter(e=>e.cur==="SGD"), e=>e.gross);
+  const statedNote = stated.length
+    ? ` <b>${stated.length} of them rest on your word, not a receipt:</b> ${stated.length===1?"it is":"they are"} recorded at a stated fixed price (${fmt(statedSum,"SGD")}) because you confirmed the figure — no receipt email exists to check against. If the price ever changes, nothing here will catch it.`
+    : "";
+  document.getElementById("unverifiedNote").innerHTML = nU
+    ? `<b>${nU} ${nU===1?"entry is":"entries are"} assumed, not confirmed.</b> They are projected at the last known price and total ${fmt(sgdA-sgdV,"SGD")}. Confirm in iPhone → Settings → your name → Media &amp; Purchases → Purchase History, then tick "Receipt verified" on each.${statedNote}`
+    : `<b>Every entry is confirmed.</b>${statedNote}`;
+
+  renderVendors(); renderCat(); renderRunRate(days, sgdV, sgdA);
+  renderMonthly(); renderApi(); renderEntries();
+  document.getElementById("raw").value = JSON.stringify(S,null,1);
+
+  const vs=[...new Set(S.map(e=>e.vendor))].sort();
+  const fv=document.getElementById("fVendor"), cur=fv.value;
+  fv.innerHTML='<option value="">All vendors</option>'+vs.map(v=>`<option${v===cur?" selected":""}>${v}</option>`).join("");
+  document.getElementById("vendors").innerHTML = vs.map(v=>`<option value="${v}">`).join("");
+}
+
+function renderVendors(){
+  const vs = [...new Set(S.map(e=>e.vendor))];
+  const rows = vs.map(v=>{
+    const es = S.filter(e=>e.vendor===v);
+    return {v, sgd:sum(es.filter(e=>e.cur==="SGD"),e=>e.gross), usd:sum(es.filter(e=>e.cur==="USD"),e=>e.gross),
+            n:es.length, unv:es.filter(e=>!e.verified).length};
+  }).sort((a,b)=>(b.sgd+b.usd)-(a.sgd+a.usd));
+  const max = Math.max(...rows.map(r=>Math.abs(r.sgd)+Math.abs(r.usd)),1);
+  document.getElementById("byVendor").innerHTML = `<div class="bars">${rows.map(r=>{
+    const tot = r.sgd + r.usd;
+    return `<div class="bar">
+      <div style="color:var(--tx2);overflow:hidden;text-overflow:ellipsis;font-size:11px" title="${r.v}">${r.v}</div>
+      <div class="track"><div class="seg" style="width:${Math.abs(tot)/max*100}%;background:${tot<0?"var(--bad)":"var(--sgd)"}"></div></div>
+      <div class="amt">${r.sgd?fmt(r.sgd,"SGD"):""}${r.usd?(r.sgd?" + ":"")+fmt(r.usd,"USD"):""}</div>
+    </div>`;}).join("")}</div>
+    <div class="legend"><span>${rows.map(r=>`${r.v}: ${r.n} ${r.n===1?"entry":"entries"}${r.unv?`, ${r.unv} assumed`:""}`).join(" &nbsp;·&nbsp; ")}</span></div>`;
+}
+
+function renderCat(){
+  const cats=[...new Set(S.map(e=>e.cat))];
+  const rows = cats.map(c=>{
+    const es=S.filter(e=>e.cat===c);
+    return {c, sgd:sum(es.filter(e=>e.cur==="SGD"),e=>e.gross), usd:sum(es.filter(e=>e.cur==="USD"),e=>e.gross),
+            tax:sum(es.filter(e=>e.cur==="SGD"),e=>e.tax), n:es.length};
+  }).sort((a,b)=>(b.sgd+b.usd)-(a.sgd+a.usd));
+  document.getElementById("byCat").innerHTML = `
+   <thead><tr><th>Category</th><th class="num">Count</th><th class="num">SGD</th><th class="num">of which GST</th><th class="num">USD</th></tr></thead>
+   <tbody>${rows.map(r=>`<tr>
+     <td><span class="dot" style="background:${CATCOL[r.c]||"#888"}"></span>${r.c}</td>
+     <td class="num">${r.n}</td>
+     <td class="num ${r.sgd<0?"neg":""}">${r.sgd?fmt(r.sgd,"SGD"):"—"}</td>
+     <td class="num" style="color:var(--tx3)">${r.tax?fmt(r.tax,"SGD"):"—"}</td>
+     <td class="num">${r.usd?fmt(r.usd,"USD"):"—"}</td></tr>`).join("")}</tbody>
+   <tfoot><tr><td>Total</td><td class="num">${S.length}</td>
+     <td class="num">${fmt(sum(rows,r=>r.sgd),"SGD")}</td>
+     <td class="num" style="color:var(--tx3)">${fmt(sum(rows,r=>r.tax),"SGD")}</td>
+     <td class="num">${fmt(sum(rows,r=>r.usd),"USD")}</td></tr></tfoot>`;
+}
+
+function renderRunRate(days, sgdV, sgdA){
+  const rec = S.filter(e=>e.recurring);
+  const recSgd = sum(rec.filter(e=>e.cur==="SGD"), e=>e.gross);
+  const months = days/30.44;
+  document.getElementById("runRate").innerHTML = `
+   <tbody>
+    <tr><td>Elapsed since first charge</td><td class="num">${days} days (${months.toFixed(1)} months)</td></tr>
+    <tr><td>Average SGD / day — verified</td><td class="num">${fmt(sgdV/days,"SGD")}</td></tr>
+    <tr><td>Average SGD / day — incl. assumed</td><td class="num">${fmt(sgdA/days,"SGD")}</td></tr>
+    <tr><td>Average SGD / month — incl. assumed</td><td class="num">${fmt(sgdA/months,"SGD")}</td></tr>
+    <tr><td>Committed recurring subscriptions</td><td class="num">${fmt(recSgd,"SGD")} / month</td></tr>
+    <tr><td>Recurring as annual commitment</td><td class="num">${fmt(recSgd*12,"SGD")} / year</td></tr>
+   </tbody>`;
+}
+
+function months(){
+  const set=[...new Set(S.map(e=>ym(e.date)))].sort();
+  if(!set.length) return [];
+  const out=[]; let cur=set[0]; const end=set[set.length-1];
+  while(cur<=end){ out.push(cur);
+    let [y,m]=cur.split("-").map(Number); m++; if(m>12){m=1;y++;}
+    cur=`${y}-${String(m).padStart(2,"0")}`;
+  } return out;
+}
+
+function renderMonthly(){
+  const ms=months();
+  const cats=[...new Set(S.map(e=>e.cat))];
+  const data=ms.map(m=>{
+    const es=S.filter(e=>ym(e.date)===m);
+    const o={m, sgd:sum(es.filter(e=>e.cur==="SGD"),e=>e.gross), usd:sum(es.filter(e=>e.cur==="USD"),e=>e.gross),
+             unv:es.some(e=>!e.verified), by:{}};
+    cats.forEach(c=>o.by[c]=sum(es.filter(e=>e.cur==="SGD"&&e.cat===c),e=>e.gross));
+    return o;
+  });
+  document.getElementById("monTable").innerHTML = `
+   <thead><tr><th>Month</th>${cats.map(c=>`<th class="num">${c}</th>`).join("")}<th class="num">SGD total</th><th class="num">USD</th><th></th></tr></thead>
+   <tbody>${data.map(d=>`<tr>
+     <td>${monthName(d.m)}</td>
+     ${cats.map(c=>`<td class="num ${d.by[c]<0?"neg":""}" style="${d.by[c]?"":"color:var(--tx3)"}">${d.by[c]?fmt(d.by[c],"SGD"):"—"}</td>`).join("")}
+     <td class="num"><b>${fmt(d.sgd,"SGD")}</b></td>
+     <td class="num">${d.usd?fmt(d.usd,"USD"):"—"}</td>
+     <td>${d.unv?'<span class="pill u">assumed</span>':'<span class="pill v">verified</span>'}</td></tr>`).join("")}</tbody>
+   <tfoot><tr><td>Total</td>
+     ${cats.map(c=>{const t=sum(data,d=>d.by[c]); return `<td class="num${t<0?" neg":""}"${t?"":' style="color:var(--tx3)"'}>${t?fmt(t,"SGD"):"—"}</td>`;}).join("")}
+     <td class="num">${fmt(sum(data,d=>d.sgd),"SGD")}</td>
+     <td class="num">${fmt(sum(data,d=>d.usd),"USD")}</td><td></td></tr></tfoot>`;
+
+  const max=Math.max(...data.map(d=>Math.max(0,d.sgd)),1);
+  document.getElementById("monBars").innerHTML = data.map(d=>`
+    <div class="bar"><div style="color:var(--tx2)">${monthName(d.m).split(" ")[0]}</div>
+      <div class="track">${cats.filter(c=>d.by[c]>0).map(c=>
+        `<div class="seg" style="width:${d.by[c]/max*100}%;background:${CATCOL[c]||"#888"}" title="${c}: ${fmt(d.by[c],"SGD")}"></div>`).join("")}</div>
+      <div class="amt">${fmt(d.sgd,"SGD")}</div></div>`).join("");
+  document.getElementById("monLegend").innerHTML = cats.map(c=>
+    `<span><span class="dot" style="background:${CATCOL[c]||"#888"}"></span>${c}</span>`).join("");
+}
+
+function renderApi(){
+  const bought = sum(S.filter(e=>e.cat==="API credits"), e=>e.gross);
+  const used = sum(API_USE, r=>r.total);
+  document.getElementById("apiTable").innerHTML = `
+   <thead><tr><th>Month</th><th class="num">Token</th><th class="num">Web search</th><th class="num">Total consumed</th><th>Note</th></tr></thead>
+   <tbody>${API_USE.map(r=>`<tr><td>${monthName(r.m)}</td>
+     <td class="num">${r.token?fmt(r.token,"USD"):"—"}</td>
+     <td class="num">${r.web?fmt(r.web,"USD"):"—"}</td>
+     <td class="num"><b>${r.total?fmt(r.total,"USD"):"—"}</b></td>
+     <td style="color:var(--tx3);font-size:12px">${r.note||""}</td></tr>`).join("")}</tbody>
+   <tfoot>
+     <tr><td>Consumed</td><td></td><td></td><td class="num">${fmt(used,"USD")}</td><td></td></tr>
+     <tr><td>Credits bought (gross, incl. GST)</td><td></td><td></td><td class="num">${fmt(bought,"USD")}</td><td style="color:var(--tx3);font-size:12px">US$20.00 net + 9% GST</td></tr>
+     <tr><td>Balance remaining</td><td></td><td></td><td class="num">${fmt(API_BALANCE,"USD")}</td><td style="color:var(--tx3);font-size:12px">consumed + balance = ${fmt(round2(used+API_BALANCE),"USD")} net ✓</td></tr>
+   </tfoot>`;
+}
+
+function renderEntries(){
+  const es=filtered().slice().sort((a,b)=>b.date.localeCompare(a.date)||a.id.localeCompare(b.id));
+  if(!es.length){ document.getElementById("entTable").innerHTML='<tbody><tr><td class="empty">No entries match.</td></tr></tbody>'; return; }
+  document.getElementById("entTable").innerHTML = `
+   <thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th class="num">Gross</th><th class="num">Tax</th><th></th><th></th></tr></thead>
+   <tbody>${es.map(e=>`<tr>
+     <td style="white-space:nowrap">${new Date(e.date).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"2-digit"})}</td>
+     <td style="color:var(--tx2)">${e.vendor}</td>
+     <td>${e.desc}<div style="font-size:11px;color:var(--tx3);margin-top:2px">${e.src||""}</div></td>
+     <td class="num ${e.gross<0?"neg":""}">${fmt(e.gross,e.cur)}</td>
+     <td class="num" style="color:var(--tx3)">${e.tax?fmt(e.tax,e.cur):"—"}</td>
+     <td>${e.verified?'<span class="pill v">verified</span>':'<span class="pill u">assumed</span>'}${e.recurring?' <span class="pill r">recurring</span>':''}</td>
+     <td style="white-space:nowrap">
+       <button class="btn sm" onclick="editEntry('${e.id}')">Edit</button>
+       <button class="btn sm danger" onclick="delEntry('${e.id}')">×</button></td></tr>`).join("")}</tbody>
+   <tfoot><tr><td colspan="3">${es.length} ${es.length===1?"entry":"entries"} shown</td>
+     <td class="num">${fmt(sum(es.filter(e=>e.cur==="SGD"),e=>e.gross),"SGD")}<br>${fmt(sum(es.filter(e=>e.cur==="USD"),e=>e.gross),"USD")}</td>
+     <td colspan="3"></td></tr></tfoot>`;
+}
+
+/* ---------- CRUD ---------- */
+function saveEntry(){
+  const g = parseFloat(document.getElementById("fGross").value);
+  const d = document.getElementById("fDate").value;
+  if(!d || isNaN(g)){ toast("Date and gross amount are required"); return; }
+  const o = {
+    id: document.getElementById("fId").value || "e"+Date.now(),
+    date:d, vendor:document.getElementById("fVend").value.trim()||"Unspecified",
+    cat:document.getElementById("fCat").value, desc:document.getElementById("fDesc").value.trim()||"—",
+    cur:document.getElementById("fCur").value, gross:round2(g),
+    tax:round2(parseFloat(document.getElementById("fTax").value)||0),
+    verified:document.getElementById("fVer").checked,
+    recurring:document.getElementById("fRec").checked,
+    src:document.getElementById("fSrc").value.trim()
+  };
+  const i = S.findIndex(x=>x.id===o.id);
+  if(i>=0) S[i]=o; else S.push(o);
+  save(); resetForm(); render(); toast(i>=0?"Entry updated":"Entry added");
+}
+function editEntry(id){
+  const e=S.find(x=>x.id===id); if(!e) return;
+  document.getElementById("fId").value=e.id; document.getElementById("fDate").value=e.date;
+  document.getElementById("fVend").value=e.vendor; document.getElementById("fCat").value=e.cat;
+  document.getElementById("fCur").value=e.cur; document.getElementById("fGross").value=e.gross;
+  document.getElementById("fTax").value=e.tax; document.getElementById("fDesc").value=e.desc;
+  document.getElementById("fSrc").value=e.src||""; document.getElementById("fVer").checked=!!e.verified;
+  document.getElementById("fRec").checked=!!e.recurring;
+  document.getElementById("formTitle").textContent="Edit entry";
+  tabTo("add"); window.scrollTo({top:0,behavior:"smooth"});
+}
+function delEntry(id){
+  if(!confirm("Delete this entry?")) return;
+  S=S.filter(x=>x.id!==id); save(); render(); toast("Entry deleted");
+}
+function resetForm(){
+  ["fId","fGross","fTax","fDesc","fSrc"].forEach(i=>document.getElementById(i).value="");
+  document.getElementById("fDate").value=new Date().toISOString().slice(0,10);
+  document.getElementById("fVer").checked=true; document.getElementById("fRec").checked=false;
+  document.getElementById("formTitle").textContent="Add an entry";
+}
+
+function project(){
+  const to=document.getElementById("projTo").value;
+  if(!to){ toast("Pick a month to project through"); return; }
+  const rec=S.filter(e=>e.recurring);
+  if(!rec.length){ toast("No subscriptions are marked recurring"); return; }
+  let n=0;
+  rec.forEach(r=>{
+    const day=r.date.slice(8,10);
+    let [y,m]=r.date.slice(0,7).split("-").map(Number);
+    while(true){
+      m++; if(m>12){m=1;y++;}
+      const key=`${y}-${String(m).padStart(2,"0")}`;
+      if(key>to) break;
+      const date=`${key}-${day}`;
+      if(S.some(e=>e.date===date && e.vendor===r.vendor && e.desc===r.desc)) continue;
+      S.push({id:"pj"+y+m+r.id, date, vendor:r.vendor, cat:r.cat, desc:r.desc, cur:r.cur,
+              gross:r.gross, tax:r.tax, verified:false, recurring:false,
+              src:"PROJECTED at last known price — not a receipt"});
+      n++;
+    }
+  });
+  save(); render(); toast(n?`${n} projected ${n===1?"entry":"entries"} added`:"Nothing new to project");
+}
+
+/* ---------- data io ---------- */
+function exportJSON(){
+  const blob=new Blob([JSON.stringify({version:VERSION,exported:new Date().toISOString(),entries:S},null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=`ai-spend-${new Date().toISOString().slice(0,10)}.json`;
+  a.click(); URL.revokeObjectURL(a.href); toast("Exported");
+}
+/* Identity of a charge. Scanner-supplied `key` wins; otherwise derive one.
+   This is what makes import additive rather than destructive. */
+function keyOf(e){
+  return e.key || [e.date, (e.vendor||"").toLowerCase(), (e.desc||"").toLowerCase(),
+                   e.cur, Number(e.gross).toFixed(2)].join("|");
+}
+
+function importJSON(inp){
+  const f=inp.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    let p, incoming;
+    try{
+      p=JSON.parse(r.result);
+      incoming = Array.isArray(p) ? p : p.entries;
+      if(!Array.isArray(incoming)) throw 0;
+    }catch(err){ toast("Could not read that file"); inp.value=""; return; }
+
+    /* Two-stage dedupe.
+       1. Exact key (receipt / order number) — authoritative.
+       2. Signature budget (date + currency + amount) — catches the same charge
+          described in different words by the scanner. Budget-counted, not a plain
+          match, so three genuine same-price top-ups on one day stay three rows. */
+    const sig = e => [e.date, e.cur, Number(e.gross).toFixed(2)].join("|");
+    const existKeys = new Set(S.map(keyOf));
+    const budget = {}; S.forEach(e => { const s = sig(e); budget[s] = (budget[s]||0) + 1; });
+
+    const fresh = [];
+    incoming.forEach(e => {
+      if(!e || !e.date || e.gross===undefined) return;
+      const s = sig(e);
+      if(existKeys.has(keyOf(e))){ if(budget[s]>0) budget[s]--; return; }
+      if(budget[s] > 0){ budget[s]--; return; }
+      fresh.push(e);
+    });
+    const skipped = incoming.length - fresh.length;
+
+    const src = (p && p.account) ? `\nAccount: ${p.account}` : "";
+    const unp = (p && Array.isArray(p.unparsed) && p.unparsed.length)
+      ? `\n\n⚠ The scan flagged ${p.unparsed.length} email(s) it could not parse. Check the scan email — those charges are NOT in this import.` : "";
+
+    if(!fresh.length){
+      alert(`Nothing new to import.${src}\n\n${incoming.length} entries in the file, all already present.${unp}`);
+      inp.value=""; return;
+    }
+
+    const preview = fresh.slice(0,8).map(e=>` • ${e.date}  ${e.vendor}  ${fmt(e.gross,e.cur)}  ${e.desc}`).join("\n");
+    const more = fresh.length>8 ? `\n … and ${fresh.length-8} more` : "";
+
+    if(!confirm(`Add ${fresh.length} new ${fresh.length===1?"entry":"entries"}?${src}\n${skipped} already present, skipped.\n\n${preview}${more}\n\nNothing existing is modified or deleted.${unp}`)){
+      inp.value=""; return;
+    }
+
+    let n=0;
+    fresh.forEach(e=>{
+      S.push({
+        id: e.id && !S.some(x=>x.id===e.id) ? e.id : "im"+Date.now()+"-"+(n++),
+        key: e.key || undefined,
+        date:e.date, vendor:e.vendor||"Unspecified", cat:e.cat||"Other",
+        desc:e.desc||"—", cur:e.cur==="USD"?"USD":"SGD",
+        gross:round2(Number(e.gross)||0), tax:round2(Number(e.tax)||0),
+        verified: e.verified!==false, recurring: !!e.recurring,
+        src: e.src || "Imported from scan"
+      });
+    });
+    save(); render(); tabTo("entries");
+    toast(`Added ${fresh.length}, skipped ${skipped}`);
+    inp.value="";
+  };
+  r.readAsText(f);
+}
+
+/* Explicit, separate, and deliberately not the default. */
+function replaceAll(inp){
+  const f=inp.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{ try{
+      const p=JSON.parse(r.result); const e=Array.isArray(p)?p:p.entries;
+      if(!Array.isArray(e)) throw 0;
+      if(!confirm(`Replace ALL ${S.length} existing entries with ${e.length} from this file?\n\nManual entries and verification ticks will be lost. Export first if unsure.`)){ inp.value=""; return; }
+      S=e; save(); render(); toast(`Replaced with ${e.length} entries`);
+    }catch(err){ toast("Could not read that file"); }
+    inp.value=""; };
+  r.readAsText(f);
+}
+function applyRaw(){
+  try{ const p=JSON.parse(document.getElementById("raw").value);
+    if(!Array.isArray(p)) throw 0;
+    S=p; save(); render(); toast("Applied");
+  }catch(e){ toast("Invalid JSON — nothing changed"); }
+}
+function seedReset(){ if(!confirm("Replace everything with the originally seeded data?")) return; S=seed(); save(); render(); toast("Seeded data restored"); }
+function wipe(){ if(!confirm("Delete all entries? Export first if you want a backup.")) return; S=[]; save(); render(); toast("All entries deleted"); }
+
+/* ---------- tabs ---------- */
+function tabTo(t){
+  document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x.dataset.t===t));
+  document.querySelectorAll("section").forEach(x=>x.classList.toggle("on",x.id===t));
+}
+document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>tabTo(t.dataset.t));
+
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js")
+    .catch(e=>console.warn("SW registration failed",e)));
+}
+
+resetForm();
+document.getElementById("projTo").value = new Date(Date.now()+15768e7).toISOString().slice(0,7);
+render();
+</script>
+</body>
+</html>
