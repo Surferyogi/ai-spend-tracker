@@ -104,7 +104,16 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
 .ck.bad{border-left-color:var(--bad)}
 .ck .ckt{font-size:13px;color:var(--tx);font-weight:600}
 .ck .ckd{font-size:12px;color:var(--tx2);margin-top:3px;line-height:1.55}
-.ck .ckrows{font-size:11.5px;color:var(--tx3);margin-top:6px;font-variant-numeric:tabular-nums;line-height:1.7}
+.ck .ckrows{margin-top:8px}
+.rcard{background:#11151d;border:1px solid #232833;border-radius:7px;padding:8px 10px;margin-top:6px}
+.rcard:first-child{margin-top:0}
+.rtop{font-size:12.5px;color:var(--tx2);font-variant-numeric:tabular-nums}
+.rtop b{color:var(--tx)}
+.rmid{font-size:12px;color:var(--tx2);margin-top:2px}
+.rbits{font-size:11px;color:var(--tx2);margin-top:5px;line-height:1.9}
+.rk{color:var(--tx3);text-transform:uppercase;letter-spacing:.5px;font-size:9.5px;margin-right:3px}
+.rsep{color:var(--tx3);margin:0 3px}
+.rsrc{font-size:10.5px;color:var(--tx3);margin-top:5px;line-height:1.5;border-top:1px solid #1c212b;padding-top:5px}
 
 .fxbar{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 13px;margin-bottom:14px;
   display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
@@ -146,7 +155,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 <header>
   <div>
     <h1>AI Spend Tracker</h1>
-    <div class="ver" id="ver">v2026:08:05-12:34</div>
+    <div class="ver" id="ver">v2026:08:05-14:20</div>
   </div>
   <div class="row">
     <button class="btn sm" onclick="exportJSON()">Export</button>
@@ -249,7 +258,11 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
       <div><label>Rate to SGD — foreign only</label><input type="number" step="0.0001" id="fRate" placeholder="blank = fetch for that date"></div>
     </div>
     <div style="margin-bottom:12px"><label>Description</label><input id="fDesc" placeholder="Subscription name"></div>
-    <div style="margin-bottom:12px"><label>Source / reference</label><input id="fSrc" placeholder="Receipt or order reference"></div>
+    <div class="grid">
+      <div><label>Invoice / receipt reference</label><input id="fRef" placeholder="invoice ABC-0001 · order XYZ"></div>
+      <div><label>Payment method</label><input id="fPay" placeholder="Visa ••1234 / Link / PayPal"></div>
+    </div>
+    <div style="margin-bottom:12px"><label>Source note</label><input id="fSrc" placeholder="where this figure came from"></div>
     <div class="row" style="margin-bottom:14px">
       <label class="chk"><input type="checkbox" id="fVer" checked> Receipt verified</label>
       <label class="chk"><input type="checkbox" id="fRec"> Recurring monthly</label>
@@ -308,7 +321,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 
 <script>
 "use strict";
-const VERSION = "v2026:08:05-12:34";
+const VERSION = "v2026:08:05-14:20";
 const KEY = "ai-spend-tracker-v1";
 
 /* ---------- seeded data: every figure below was read off a receipt or a console page ---------- */
@@ -527,8 +540,24 @@ function monthsBetween(a,b){
   const [ay,am]=a.split("-").map(Number), [by,bm]=b.split("-").map(Number);
   return (by-ay)*12 + (bm-am);
 }
-function rowLine(e){
-  return `${dayName(e.date)} · ${esc(e.vendor)} · ${fmt(e.gross,e.cur)} · ${esc(e.desc)}`;
+/* A finding is only actionable if you can go and check it. Each row therefore
+   carries what you would need to pull the charge up at the vendor: the invoice or
+   receipt reference, the card it hit, the tax, and the SGD it became. */
+function rowCard(e){
+  const sg = sgOf(e), foreign = e.cur !== "SGD";
+  const bits = [];
+  if(e.ref)  bits.push(`<span class="rk">Ref</span> ${esc(e.ref)}`);
+  if(e.pay)  bits.push(`<span class="rk">Paid by</span> ${esc(e.pay)}`);
+  if(e.tax)  bits.push(`<span class="rk">Tax</span> ${fmt(e.tax,e.cur)}`);
+  bits.push(`<span class="rk">Category</span> ${esc(e.cat)}`);
+  bits.push(e.verified ? '<span class="pill v">verified</span>' : '<span class="pill u">assumed</span>');
+  return `<div class="rcard">
+    <div class="rtop"><b>${dayName(e.date)}</b> · ${esc(e.vendor)} · <b>${fmt(e.gross,e.cur)}</b>${
+      foreign && e.gross ? ` <span style="color:var(--tx3)">(${sg===null?"rate pending":"≈ "+fmt(sg,"SGD")})</span>` : ""}</div>
+    <div class="rmid">${esc(e.desc)}</div>
+    <div class="rbits">${bits.join(' <span class="rsep">·</span> ')}</div>
+    ${e.src ? `<div class="rsrc">${esc(e.src)}</div>` : ""}
+  </div>`;
 }
 
 function runChecks(){
@@ -668,7 +697,7 @@ function renderChecks(){
   el.innerHTML = f.map(x => `<div class="ck ${x.level}">
       <div class="ckt">${x.title}</div>
       <div class="ckd">${x.detail}</div>
-      ${x.rows && x.rows.length ? `<div class="ckrows">${x.rows.map(rowLine).join("<br>")}</div>` : ""}
+      ${x.rows && x.rows.length ? `<div class="ckrows">${x.rows.map(rowCard).join("")}</div>` : ""}
     </div>`).join("");
 }
 
@@ -798,6 +827,7 @@ function catDetail(es){
       <td style="white-space:nowrap">${dayName(e.date)}</td>
       <td style="color:var(--tx2)">${esc(e.vendor)}</td>
       <td>${esc(e.desc)}
+        <div class="dsrc">${[e.ref && "Ref "+esc(e.ref), e.pay && "Paid by "+esc(e.pay)].filter(Boolean).join(" · ")}</div>
         <div class="dsrc">${esc(e.src||"no source recorded")}</div></td>
       <td class="num ${e.gross<0?"neg":""}">${fmt(e.gross,e.cur)}
         ${convNote(e)}</td>
@@ -974,7 +1004,9 @@ function saveEntry(){
     tax:round2(parseFloat(document.getElementById("fTax").value)||0),
     verified:document.getElementById("fVer").checked,
     recurring:document.getElementById("fRec").checked,
-    src:document.getElementById("fSrc").value.trim()
+    src:document.getElementById("fSrc").value.trim(),
+    ref:document.getElementById("fRef").value.trim(),
+    pay:document.getElementById("fPay").value.trim()
   };
   const i = S.findIndex(x=>x.id===o.id);
 
@@ -1003,6 +1035,8 @@ function editEntry(id){
   document.getElementById("fGross").value=e.gross;
   document.getElementById("fTax").value=e.tax; document.getElementById("fDesc").value=e.desc;
   document.getElementById("fSrc").value=e.src||"";
+  document.getElementById("fRef").value=e.ref||"";
+  document.getElementById("fPay").value=e.pay||"";
   document.getElementById("fRate").value = (typeof e.fxRate==="number") ? e.fxRate : "";
   document.getElementById("fVer").checked=!!e.verified;
   document.getElementById("fRec").checked=!!e.recurring;
@@ -1014,7 +1048,7 @@ function delEntry(id){
   S=S.filter(x=>x.id!==id); save(); render(); toast("Entry deleted");
 }
 function resetForm(){
-  ["fId","fGross","fTax","fDesc","fSrc","fRate"].forEach(i=>document.getElementById(i).value="");
+  ["fId","fGross","fTax","fDesc","fSrc","fRate","fRef","fPay"].forEach(i=>document.getElementById(i).value="");
   document.getElementById("fDate").value=new Date().toISOString().slice(0,10);
   document.getElementById("fVer").checked=true; document.getElementById("fRec").checked=false;
   document.getElementById("formTitle").textContent="Add an entry";
@@ -1115,6 +1149,8 @@ function importJSON(inp){
         gross:round2(Number(e.gross)||0), tax:round2(Number(e.tax)||0),
         verified: e.verified!==false, recurring: !!e.recurring,
         src: e.src || "Imported from scan",
+        ...(e.ref ? {ref:String(e.ref)} : {}),
+        ...(e.pay ? {pay:String(e.pay)} : {}),
         ...(typeof e.fxRate === "number" && e.fxRate > 0
             ? { fxRate:round4(e.fxRate), fxDate:e.fxDate || e.date, fxSrc:e.fxSrc || "imported" }
             : {})
