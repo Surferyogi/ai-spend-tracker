@@ -169,7 +169,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 <header>
   <div>
     <h1>AI Spend Tracker</h1>
-    <div class="ver" id="ver">v2026:08:05-22:08</div>
+    <div class="ver" id="ver">v2026:08:05-22:18</div>
   </div>
   <div class="row">
     <button class="btn sm" onclick="exportJSON()">Export</button>
@@ -321,6 +321,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
       <button class="btn" onclick="document.getElementById('rep').click()">Replace all from file</button>
       <input type="file" id="rep" accept=".json" style="display:none" onchange="replaceAll(this)">
       <button class="btn" onclick="seedReset()">Restore seeded data</button>
+      <button class="btn" onclick="dedupeRows()">Merge duplicate rows</button>
       <button class="btn" onclick="clearReview()">Clear review history</button>
       <button class="btn danger" onclick="wipe()">Delete everything</button>
     </div>
@@ -337,7 +338,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 
 <script>
 "use strict";
-const VERSION = "v2026:08:05-22:08";
+const VERSION = "v2026:08:05-22:18";
 const KEY = "ai-spend-tracker-v1";
 
 /* ---------- seeded data: every figure below was read off a receipt or a console page ---------- */
@@ -1258,13 +1259,14 @@ function importJSON(inp){
     const byId = {}; S.forEach(e => { if(e.id) byId[e.id] = e; });
     const budget = {}; S.forEach(e => { const s = sig(e); budget[s] = (budget[s]||0) + 1; });
 
-    const updates = [], rest = [], claimed = new Set();
+    const updates = [], idMatched = [], rest = [], claimed = new Set();
     incoming.forEach(e => {
       if(!e || !e.date || e.gross===undefined) return;
       const cur = e.id ? byId[e.id] : null;
       if(cur && !claimed.has(e.id)){
         claimed.add(e.id);
         const s = sig(cur); if(budget[s] > 0) budget[s]--;   // the old row is accounted for
+        idMatched.push({from:cur, to:e});
         if(rowSig(cur) !== rowSig(e)) updates.push({from:cur, to:e});
         return;                                              // identical → already present
       }
@@ -1278,13 +1280,20 @@ function importJSON(inp){
        beside it with a generated id. Updating the stale row then makes it a
        second copy of a row already present — the ledger grows a duplicate
        instead of losing one, and the total climbs by the charge's own value.
-       So: if applying an update would collide with a DIFFERENT existing row,
-       that other row is the same charge recorded twice. Merge them, keep the
-       file's id so future corrections keep matching, and say so plainly in the
-       dialog — this is the only path in the whole importer that removes a row,
-       and it never runs unconfirmed. */
+       So: if a row the file identifies by id ALSO exists under another id with
+       the same content, that is the same charge recorded twice. Merge them, keep
+       the file's id so future corrections keep matching, and say so plainly in
+       the dialog — this is the only path in the whole importer that removes a
+       row, and it never runs unconfirmed.
+
+       This runs over EVERY id-matched row, not only the ones being corrected.
+       Checking updates alone was not enough: once an earlier import had already
+       applied the correction, there was no update left to trigger the check, so
+       a device stuck at the duplicated state was told "nothing new to import"
+       while the duplicate sat there. The collision is a property of the ledger,
+       not of whether this particular file changes anything. */
     const superseded = [];
-    updates.forEach(u => {
+    idMatched.forEach(u => {
       const k = keyOf(u.to);
       S.forEach(e => {
         if(e.id === u.from.id) return;                 // the row being updated
@@ -1310,7 +1319,7 @@ function importJSON(inp){
     const unp = (p && Array.isArray(p.unparsed) && p.unparsed.length)
       ? `\n\n⚠ The scan flagged ${p.unparsed.length} email(s) it could not parse. Check the scan email — those charges are NOT in this import.` : "";
 
-    if(!fresh.length && !updates.length){
+    if(!fresh.length && !updates.length && !superseded.length){
       alert(`Nothing new to import.${src}\n\n${incoming.length} entries in the file, all already present.${unp}`);
       inp.value=""; return;
     }
@@ -1400,6 +1409,46 @@ function applyRaw(){
     S=p; save(); render(); toast("Applied");
   }catch(e){ toast("Invalid JSON — nothing changed"); }
 }
+/* Duplicate cleaner that does not need an import to run.
+   Twice now a duplicated row has outlived a fix to the importer, because the
+   importer only ever sees the ledger through the file it is given. A duplicate
+   is a property of the ledger itself, so it deserves a tool of its own.
+   Rows are grouped by keyOf: a receipt or order number when one exists,
+   otherwise date + vendor + description + currency + amount. Genuinely repeated
+   charges that carry distinct receipt numbers — several identically priced
+   top-ups bought on one day — group separately and are never touched. Every
+   group is listed in full before anything is removed. */
+function dupeGroups(){
+  const by = {};
+  S.forEach(e => { const k = keyOf(e); (by[k] = by[k] || []).push(e); });
+  return Object.keys(by).filter(k => by[k].length > 1).map(k => by[k]);
+}
+// The copy worth keeping is the one carrying the most provenance.
+function provScore(e){
+  return (e.verified ? 8 : 0) + (e.key ? 4 : 0) + (e.ref ? 2 : 0) + (e.src ? 1 : 0);
+}
+function dedupeRows(){
+  const groups = dupeGroups();
+  if(!groups.length){ toast("No duplicate rows found"); return; }
+  const extra = groups.reduce((a,g)=>a+g.length-1, 0);
+  const lines = groups.slice(0,8).map(g =>
+    ` • ${dayName(g[0].date)}  ${fmt(g[0].gross,g[0].cur)}  ${g[0].desc}\n` +
+    `     ${g.length} copies — keeping 1`).join("\n");
+  const more = groups.length>8 ? `\n … and ${groups.length-8} more` : "";
+  if(!confirm(`Remove ${extra} duplicate ${extra===1?"row":"rows"}?\n\n${lines}${more}\n\n`
+    + `Rows are treated as duplicates when they share a receipt or order number, `
+    + `or when date, vendor, description, currency and amount all match. The copy `
+    + `with the most provenance is kept.\n\nExport first if you want a backup.`)) return;
+  const keep = new Set();
+  groups.forEach(g => {
+    const best = g.slice().sort((a,b)=>provScore(b)-provScore(a))[0];
+    g.forEach(e => { if(e !== best) keep.add(e.id); });
+  });
+  S = S.filter(e => !keep.has(e.id));
+  save(); render();
+  toast(`Removed ${extra} duplicate ${extra===1?"row":"rows"}`);
+}
+
 function seedReset(){
   const now = S.length, want = seed().length;
   if(!confirm(`Replace the whole ledger with this build's built-in data?\n\n`
