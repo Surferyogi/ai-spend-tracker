@@ -94,6 +94,20 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
 .src b{color:var(--tx2)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 16px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:99}
 .toast.on{opacity:1}
+.toast.act{pointer-events:auto}
+.tundo{margin-left:12px;background:none;border:1px solid var(--line);color:var(--accent);
+  border-radius:6px;padding:3px 10px;font:inherit;font-size:12px;cursor:pointer}
+.tundo:hover{border-color:var(--accent)}
+.racts{margin-top:9px;display:flex;gap:6px}
+.revbar{border:1px solid var(--line);border-radius:9px;padding:11px 13px;margin:0 0 12px;
+  display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:13px;background:var(--panel2)}
+.revbar.due{border-color:var(--warn)}
+.revbar.ok{border-color:var(--line)}
+.revbar > div{flex:1 1 260px}
+.revnote{flex-basis:100%;color:var(--tx2);font-size:12px;margin-top:-4px}
+.newpill{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;font-size:10.5px;
+  letter-spacing:.4px;background:rgba(224,179,65,.16);color:var(--warn);border:1px solid rgba(224,179,65,.4);
+  vertical-align:middle}
 .empty{color:var(--tx3);font-size:13px;text-align:center;padding:22px}
 .ckcount{font-size:11px;color:var(--tx3);font-weight:400;text-transform:none;letter-spacing:0;margin-left:6px}
 .ck{border-left:3px solid var(--line);background:#141821;border-radius:0 8px 8px 0;padding:10px 13px;margin-bottom:8px}
@@ -155,7 +169,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 <header>
   <div>
     <h1>AI Spend Tracker</h1>
-    <div class="ver" id="ver">v2026:08:05-14:20</div>
+    <div class="ver" id="ver">v2026:08:05-20:54</div>
   </div>
   <div class="row">
     <button class="btn sm" onclick="exportJSON()">Export</button>
@@ -179,6 +193,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 <section id="overview" class="on">
   <div class="panel" id="checksPanel">
     <h2>Billing checks <span id="checksCount" class="ckcount"></span></h2>
+    <div id="reviewBar"></div>
     <div id="checks"></div>
   </div>
 
@@ -306,6 +321,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
       <button class="btn" onclick="document.getElementById('rep').click()">Replace all from file</button>
       <input type="file" id="rep" accept=".json" style="display:none" onchange="replaceAll(this)">
       <button class="btn" onclick="seedReset()">Restore seeded data</button>
+      <button class="btn" onclick="clearReview()">Clear review history</button>
       <button class="btn danger" onclick="wipe()">Delete everything</button>
     </div>
   </div>
@@ -321,7 +337,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 
 <script>
 "use strict";
-const VERSION = "v2026:08:05-14:20";
+const VERSION = "v2026:08:05-20:54";
 const KEY = "ai-spend-tracker-v1";
 
 /* ---------- seeded data: every figure below was read off a receipt or a console page ---------- */
@@ -358,7 +374,23 @@ const fmt = (n,c)=> (n<0?"-":"") + (SYM[c]||(c+" ")) + Math.abs(n).toLocaleStrin
 const ym  = d => d.slice(0,7);
 const monthName = m => new Date(m+"-01T00:00:00").toLocaleDateString("en-GB",{month:"short",year:"numeric"});
 const dayName = d => new Date(d).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"});
-function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("on"); setTimeout(()=>t.classList.remove("on"),2600); }
+function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.remove("act"); t.classList.add("on"); setTimeout(()=>t.classList.remove("on"),2600); }
+
+/* Toast that carries one clickable action. Used for Undo after a delete, so a
+   mis-click on × is recoverable without hunting for the figures again. */
+let TOAST_T = null;
+function toastAction(msg, label, fn, ms){
+  const t = document.getElementById("toast");
+  t.textContent = "";
+  t.appendChild(document.createTextNode(msg));
+  const b = document.createElement("button");
+  b.className = "tundo"; b.id = "toastAct"; b.textContent = label;
+  b.onclick = () => { t.classList.remove("on","act"); fn(); };
+  t.appendChild(b);
+  t.classList.add("on","act");
+  if(TOAST_T) clearTimeout(TOAST_T);
+  TOAST_T = setTimeout(()=>t.classList.remove("on","act"), ms || 9000);
+}
 function sum(arr,f){ return arr.reduce((a,b)=>a+f(b),0); }
 function round2(n){ return Math.round(n*100)/100; }
 function round4(n){ return Math.round(n*10000)/10000; }
@@ -545,6 +577,9 @@ function monthsBetween(a,b){
    receipt reference, the card it hit, the tax, and the SGD it became. */
 function rowCard(e){
   const sg = sgOf(e), foreign = e.cur !== "SGD";
+  /* Only offer Edit/Delete for a row that actually exists in the ledger — a
+     flagged row is the one you most want to fix, so the buttons belong here. */
+  const live = !!(e.id && S.some(x=>x.id===e.id));
   const bits = [];
   if(e.ref)  bits.push(`<span class="rk">Ref</span> ${esc(e.ref)}`);
   if(e.pay)  bits.push(`<span class="rk">Paid by</span> ${esc(e.pay)}`);
@@ -557,6 +592,10 @@ function rowCard(e){
     <div class="rmid">${esc(e.desc)}</div>
     <div class="rbits">${bits.join(' <span class="rsep">·</span> ')}</div>
     ${e.src ? `<div class="rsrc">${esc(e.src)}</div>` : ""}
+    ${live ? `<div class="racts">
+      <button class="btn sm" onclick="editEntry('${esc(e.id)}')">Edit</button>
+      <button class="btn sm danger" title="Delete this entry" onclick="delEntry('${esc(e.id)}')">Delete</button>
+    </div>` : ""}
   </div>`;
 }
 
@@ -683,19 +722,89 @@ function runChecks(){
   return out;
 }
 
+/* ---------- monthly review cycle ----------
+   The checks themselves re-run on every render, so a finding is never stale.
+   What was missing is a CADENCE: a record of when you last read them, so a
+   finding raised since then stands out instead of blending into ones you have
+   already judged. A PWA cannot wake itself up, so this is a prompt on open, not
+   a background job — the app says a review is due, it does not do it for you.
+   Kept in its own storage key so it never touches the ledger, its export, or
+   its import. */
+const RKEY = "ai-spend-review-v1";
+function loadReview(){
+  try{
+    const r = localStorage.getItem(RKEY);
+    if(r){ const p = JSON.parse(r);
+      if(p && typeof p === "object")
+        return { month:p.month||"", on:p.on||"", seen:Array.isArray(p.seen)?p.seen:[] }; }
+  }catch(e){}
+  return { month:"", on:"", seen:[] };
+}
+function saveReview(){ try{ localStorage.setItem(RKEY, JSON.stringify(REV)); }catch(e){} }
+let REV = loadReview();
+
+function thisMonth(){ return new Date().toISOString().slice(0,10).slice(0,7); }
+/* A finding's identity. Title carries the vendor, item, month and amounts, so a
+   changed amount is correctly a DIFFERENT finding and re-announces itself. */
+function fidOf(x){ return x.title + "|" + (x.rows||[]).map(r=>r.id).sort().join(","); }
+
+function markReviewed(){
+  const f = runChecks();
+  REV = { month: thisMonth(), on: new Date().toISOString().slice(0,10), seen: f.map(fidOf) };
+  saveReview(); renderChecks();
+  toast(`${monthName(REV.month)} billing review recorded`);
+}
+function clearReview(){
+  if(!confirm("Forget the review history?\n\nEvery current finding is then treated as new again. Your entries are untouched.")) return;
+  REV = { month:"", on:"", seen:[] }; saveReview(); renderChecks(); toast("Review history cleared");
+}
+
+function reviewBar(f, freshN){
+  const due = REV.month !== thisMonth();
+  const btn = `<button class="btn sm pri" id="revBtn" onclick="markReviewed()">Mark ${monthName(thisMonth())} reviewed</button>`;
+  const newTxt = freshN
+    ? `<b>${freshN} new finding${freshN===1?"":"s"}</b> since ${dayName(REV.on)}.`
+    : (REV.on ? "Nothing new since." : "");
+  if(due){
+    return `<div class="revbar due" id="revBar">
+      <div><b>Monthly review due — ${monthName(thisMonth())}</b></div>
+      ${btn}
+      <div class="revnote">${
+        REV.on ? `Last reviewed ${dayName(REV.on)} for ${monthName(REV.month)}. ` : "Never reviewed. "
+      }${f.length ? `${f.length} finding${f.length===1?"":"s"} to read. ` : "Nothing is flagged right now. "}${newTxt}</div>
+    </div>`;
+  }
+  return `<div class="revbar ok" id="revBar">
+    <div>Reviewed ${dayName(REV.on)} for ${monthName(REV.month)}. ${newTxt || "Next review due " + monthName(nextMonth(REV.month)) + "."}</div>
+    ${freshN ? btn : ""}
+  </div>`;
+}
+function nextMonth(m){
+  let [y,mm] = m.split("-").map(Number);
+  mm++; if(mm>12){mm=1;y++;}
+  return `${y}-${String(mm).padStart(2,"0")}`;
+}
+
 function renderChecks(){
   const f = runChecks();
   const el = document.getElementById("checks");
   const n = f.filter(x=>x.level==="bad"||x.level==="warn").length;
+  const seen = new Set(REV.seen);
+  // Nothing is "new" before a first review — that would badge everything.
+  const isNew = x => !!REV.on && !seen.has(fidOf(x));
+  const freshN = f.filter(isNew).length;
+
   document.getElementById("checksCount").textContent =
     f.length ? `${n ? n + " needing attention · " : ""}${f.length} finding${f.length===1?"":"s"}` : "";
+  document.getElementById("reviewBar").innerHTML = reviewBar(f, freshN);
+
   if(!f.length){
     el.innerHTML = `<div class="ck ok"><div class="ckt">Nothing looks wrong.</div>
       <div class="ckd">Checked for repeated monthly charges, price changes, missing renewals, stale subscriptions, unconverted charges, unverified rows, outlier months and duplicate receipts across all ${S.length} entries.</div></div>`;
     return;
   }
   el.innerHTML = f.map(x => `<div class="ck ${x.level}">
-      <div class="ckt">${x.title}</div>
+      <div class="ckt">${x.title}${isNew(x) ? '<span class="newpill">NEW</span>' : ""}</div>
       <div class="ckd">${x.detail}</div>
       ${x.rows && x.rows.length ? `<div class="ckrows">${x.rows.map(rowCard).join("")}</div>` : ""}
     </div>`).join("");
@@ -799,7 +908,9 @@ function monthDetail(m){
       <td>${esc(e.desc)}<div class="dsrc">${esc(e.src||"no source recorded")}</div></td>
       <td class="num ${e.gross<0?"neg":""}">${fmt(e.gross,e.cur)}
         ${convNote(e)}</td>
-      <td><button class="btn sm" onclick="event.stopPropagation();editEntry('${esc(e.id)}')">Edit</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn sm" onclick="event.stopPropagation();editEntry('${esc(e.id)}')">Edit</button>
+        <button class="btn sm danger" title="Delete this entry" onclick="event.stopPropagation();delEntry('${esc(e.id)}')">×</button></td>
     </tr>`;
   }).join("");
   return `<div class="dtlbox" onclick="event.stopPropagation()">
@@ -833,7 +944,9 @@ function catDetail(es){
         ${convNote(e)}</td>
       <td class="num" style="color:var(--tx3)">${e.tax?fmt(e.tax,e.cur):"—"}</td>
       <td>${e.verified?'<span class="pill v">verified</span>':'<span class="pill u">assumed</span>'}${e.recurring?' <span class="pill r">recurring</span>':''}</td>
-      <td><button class="btn sm" onclick="editEntry('${esc(e.id)}')">Edit</button></td>
+      <td style="white-space:nowrap">
+        <button class="btn sm" onclick="event.stopPropagation();editEntry('${esc(e.id)}')">Edit</button>
+        <button class="btn sm danger" title="Delete this entry" onclick="event.stopPropagation();delEntry('${esc(e.id)}')">×</button></td>
     </tr>`;
   }).join("");
   return `<tr class="dtlwrap"><td colspan="5" style="padding:0">
@@ -1043,9 +1156,27 @@ function editEntry(id){
   document.getElementById("formTitle").textContent="Edit entry";
   tabTo("add"); window.scrollTo({top:0,behavior:"smooth"});
 }
+/* Delete names the row before it goes, and is undoable for a few seconds.
+   Deleting a receipted charge destroys provenance that took real work to
+   establish, so it must never happen on a stray tap. */
 function delEntry(id){
-  if(!confirm("Delete this entry?")) return;
-  S=S.filter(x=>x.id!==id); save(); render(); toast("Entry deleted");
+  const i = S.findIndex(x=>x.id===id); if(i<0) return;
+  const e = S[i];
+  const lines = [
+    `${dayName(e.date)} · ${e.vendor} · ${fmt(e.gross,e.cur)}`,
+    e.desc || "",
+    e.ref ? "Ref " + e.ref : "",
+    e.pay ? "Paid by " + e.pay : ""
+  ].filter(Boolean).join("\n");
+  if(!confirm(`Delete this entry?\n\n${lines}\n\nIt is removed from every total. You can undo straight after.`)) return;
+  const removed = e, at = i;
+  S = S.filter(x=>x.id!==id);
+  save(); render();
+  toastAction("Entry deleted.", "Undo", ()=>{
+    if(S.some(x=>x.id===removed.id)) { toast("Already back"); return; }
+    S.splice(Math.min(at, S.length), 0, removed);
+    save(); render(); toast("Delete undone");
+  });
 }
 function resetForm(){
   ["fId","fGross","fTax","fDesc","fSrc","fRate","fRef","fPay"].forEach(i=>document.getElementById(i).value="");
@@ -1104,61 +1235,114 @@ function importJSON(inp){
       if(!Array.isArray(incoming)) throw 0;
     }catch(err){ toast("Could not read that file"); inp.value=""; return; }
 
-    /* Two-stage dedupe.
+    /* Dedupe in three passes.
+       0. Same id, changed content — a CORRECTION. It must REPLACE the old row,
+          never sit beside it. Without this, re-dating or re-pricing a charge in
+          a published build leaves the superseded row stranded on every device
+          that already imported it, and the month then shows two charges where
+          only one exists. A real subscription row was duplicated this way: the
+          old date-and-price version sat beside its own correction.
        1. Exact key (receipt / order number) — authoritative.
        2. Signature budget (date + currency + amount) — catches the same charge
           described in different words by the scanner. Budget-counted, not a plain
           match, so three genuine same-price top-ups on one day stay three rows. */
     const sig = e => [e.date, e.cur, Number(e.gross).toFixed(2)].join("|");
-    const existKeys = new Set(S.map(keyOf));
+    const rowSig = e => JSON.stringify([
+      e.date, (e.vendor||"").trim(), (e.cat||"").trim(), (e.desc||"").trim(),
+      e.cur, round2(Number(e.gross)||0), round2(Number(e.tax)||0),
+      e.verified !== false, !!e.recurring,
+      (e.src||"").trim(), (e.ref||"").trim(), (e.pay||"").trim(),
+      typeof e.fxRate === "number" ? round4(e.fxRate) : null
+    ]);
+
+    const byId = {}; S.forEach(e => { if(e.id) byId[e.id] = e; });
     const budget = {}; S.forEach(e => { const s = sig(e); budget[s] = (budget[s]||0) + 1; });
 
-    const fresh = [];
+    const updates = [], rest = [], claimed = new Set();
     incoming.forEach(e => {
       if(!e || !e.date || e.gross===undefined) return;
+      const cur = e.id ? byId[e.id] : null;
+      if(cur && !claimed.has(e.id)){
+        claimed.add(e.id);
+        const s = sig(cur); if(budget[s] > 0) budget[s]--;   // the old row is accounted for
+        if(rowSig(cur) !== rowSig(e)) updates.push({from:cur, to:e});
+        return;                                              // identical → already present
+      }
+      rest.push(e);
+    });
+
+    // A row about to be replaced must not also block a genuinely new import.
+    const existKeys = new Set(S.filter(e => !claimed.has(e.id)).map(keyOf));
+
+    const fresh = [];
+    rest.forEach(e => {
       const s = sig(e);
       if(existKeys.has(keyOf(e))){ if(budget[s]>0) budget[s]--; return; }
       if(budget[s] > 0){ budget[s]--; return; }
       fresh.push(e);
     });
-    const skipped = incoming.length - fresh.length;
+    const skipped = incoming.length - fresh.length - updates.length;
 
     const src = (p && p.account) ? `\nAccount: ${p.account}` : "";
     const unp = (p && Array.isArray(p.unparsed) && p.unparsed.length)
       ? `\n\n⚠ The scan flagged ${p.unparsed.length} email(s) it could not parse. Check the scan email — those charges are NOT in this import.` : "";
 
-    if(!fresh.length){
+    if(!fresh.length && !updates.length){
       alert(`Nothing new to import.${src}\n\n${incoming.length} entries in the file, all already present.${unp}`);
       inp.value=""; return;
     }
 
+    const normRow = (e, id) => ({
+      id,
+      key: e.key || undefined,
+      date:e.date, vendor:e.vendor||"Unspecified", cat:e.cat||"Other",
+      desc:e.desc||"—",
+      cur: (typeof e.cur === "string" && /^[A-Za-z]{3}$/.test(e.cur)) ? e.cur.toUpperCase() : "SGD",
+      gross:round2(Number(e.gross)||0), tax:round2(Number(e.tax)||0),
+      verified: e.verified!==false, recurring: !!e.recurring,
+      src: e.src || "Imported from scan",
+      ...(e.ref ? {ref:String(e.ref)} : {}),
+      ...(e.pay ? {pay:String(e.pay)} : {}),
+      ...(typeof e.fxRate === "number" && e.fxRate > 0
+          ? { fxRate:round4(e.fxRate), fxDate:e.fxDate || e.date, fxSrc:e.fxSrc || "imported" }
+          : {})
+    });
+
     const preview = fresh.slice(0,8).map(e=>` • ${e.date}  ${e.vendor}  ${fmt(e.gross,e.cur)}  ${e.desc}`).join("\n");
     const more = fresh.length>8 ? `\n … and ${fresh.length-8} more` : "";
 
-    if(!confirm(`Add ${fresh.length} new ${fresh.length===1?"entry":"entries"}?${src}\n${skipped} already present, skipped.\n\n${preview}${more}\n\nNothing existing is modified or deleted.${unp}`)){
+    const upLines = updates.slice(0,6).map(u =>
+      ` • ${u.from.date} ${fmt(u.from.gross,u.from.cur)}  →  ${u.to.date} ${fmt(u.to.gross,u.to.cur)}   ${u.to.desc||u.from.desc}`).join("\n");
+    const upMore = updates.length>6 ? `\n … and ${updates.length-6} more` : "";
+
+    const parts = [];
+    if(fresh.length)   parts.push(`add ${fresh.length} new ${fresh.length===1?"entry":"entries"}`);
+    if(updates.length) parts.push(`replace ${updates.length} corrected ${updates.length===1?"entry":"entries"}`);
+
+    const body =
+      (fresh.length   ? `\nNEW:\n${preview}${more}\n` : "") +
+      (updates.length ? `\nCORRECTED (the old version is replaced, not duplicated):\n${upLines}${upMore}\n` : "");
+
+    const guarantee = updates.length
+      ? "Only the listed corrected entries are modified. Nothing is deleted."
+      : "Nothing existing is modified or deleted.";
+
+    if(!confirm(`Import will ${parts.join(" and ")}.${src}\n${skipped} already present, skipped.\n${body}\n${guarantee}${unp}`)){
       inp.value=""; return;
     }
 
+    updates.forEach(u=>{
+      const i = S.findIndex(x=>x.id===u.from.id);
+      if(i>=0) S[i] = normRow(u.to, u.from.id);
+    });
+
     let n=0;
     fresh.forEach(e=>{
-      S.push({
-        id: e.id && !S.some(x=>x.id===e.id) ? e.id : "im"+Date.now()+"-"+(n++),
-        key: e.key || undefined,
-        date:e.date, vendor:e.vendor||"Unspecified", cat:e.cat||"Other",
-        desc:e.desc||"—", cur:e.cur==="USD"?"USD":"SGD",
-        gross:round2(Number(e.gross)||0), tax:round2(Number(e.tax)||0),
-        verified: e.verified!==false, recurring: !!e.recurring,
-        src: e.src || "Imported from scan",
-        ...(e.ref ? {ref:String(e.ref)} : {}),
-        ...(e.pay ? {pay:String(e.pay)} : {}),
-        ...(typeof e.fxRate === "number" && e.fxRate > 0
-            ? { fxRate:round4(e.fxRate), fxDate:e.fxDate || e.date, fxSrc:e.fxSrc || "imported" }
-            : {})
-      });
+      S.push(normRow(e, e.id && !S.some(x=>x.id===e.id) ? e.id : "im"+Date.now()+"-"+(n++)));
     });
     save(); render(); tabTo("entries");
     autoResolve();
-    toast(`Added ${fresh.length}, skipped ${skipped}`);
+    toast(`Added ${fresh.length}, replaced ${updates.length}, skipped ${skipped}`);
     inp.value="";
   };
   r.readAsText(f);
@@ -1183,7 +1367,15 @@ function applyRaw(){
     S=p; save(); render(); toast("Applied");
   }catch(e){ toast("Invalid JSON — nothing changed"); }
 }
-function seedReset(){ if(!confirm("Replace everything with the originally seeded data?")) return; S=seed(); save(); render(); toast("Seeded data restored"); }
+function seedReset(){
+  const now = S.length, want = seed().length;
+  if(!confirm(`Replace the whole ledger with this build's built-in data?\n\n`
+    + `On this device now: ${now} ${now===1?"entry":"entries"}\n`
+    + `Built into this build: ${want} ${want===1?"entry":"entries"}\n\n`
+    + `Anything you added or edited yourself is LOST. Export first if unsure.\n`
+    + `Use this to clear rows left behind by an older version.`)) return;
+  S=seed(); save(); render(); toast(`Restored ${S.length} built-in entries`);
+}
 function wipe(){ if(!confirm("Delete all entries? Export first if you want a backup.")) return; S=[]; save(); render(); toast("All entries deleted"); }
 
 /* ---------- tabs ---------- */
@@ -1206,6 +1398,20 @@ autoResolve();
 
 document.getElementById("projTo").value = new Date(Date.now()+15768e7).toISOString().slice(0,7);
 render();
+
+/* Several checks are date-relative — a missing renewal, a subscription gone
+   quiet, whether this month's review is due. An installed PWA is often left
+   open for weeks, so re-render when it comes back to the foreground and once an
+   hour while it sits there. Without this, the app would still be reasoning
+   about the day it was opened. */
+let LAST_DAY = new Date().toISOString().slice(0,10);
+function refreshIfDayChanged(){
+  const d = new Date().toISOString().slice(0,10);
+  if(d !== LAST_DAY){ LAST_DAY = d; render(); }
+}
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refreshIfDayChanged(); });
+window.addEventListener("focus", refreshIfDayChanged);
+setInterval(refreshIfDayChanged, 36e5);
 </script>
 </body>
 </html>
