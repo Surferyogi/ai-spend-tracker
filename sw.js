@@ -2,7 +2,7 @@
    Cache-first for the app shell so it opens with no network at all.
    Bump CACHE when you change index.html, or the old copy keeps being served. */
 
-const CACHE = 'ai-spend-v15';
+const CACHE = 'ai-spend-v16';
 const SHELL = [
   './',
   './index.html',

@@ -169,7 +169,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 <header>
   <div>
     <h1>AI Spend Tracker</h1>
-    <div class="ver" id="ver">v2026:08:05-20:54</div>
+    <div class="ver" id="ver">v2026:08:05-22:08</div>
   </div>
   <div class="row">
     <button class="btn sm" onclick="exportJSON()">Export</button>
@@ -337,7 +337,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 
 <script>
 "use strict";
-const VERSION = "v2026:08:05-20:54";
+const VERSION = "v2026:08:05-22:08";
 const KEY = "ai-spend-tracker-v1";
 
 /* ---------- seeded data: every figure below was read off a receipt or a console page ---------- */
@@ -1271,8 +1271,31 @@ function importJSON(inp){
       rest.push(e);
     });
 
+    /* COLLISION AFTER A CORRECTION. Replacing a stale row in place is not enough
+       on a device that already imported the correction under a different id.
+       That happens whenever an OLDER build's additive merge could not recognise
+       a correction: it left the superseded row alone and added the corrected one
+       beside it with a generated id. Updating the stale row then makes it a
+       second copy of a row already present — the ledger grows a duplicate
+       instead of losing one, and the total climbs by the charge's own value.
+       So: if applying an update would collide with a DIFFERENT existing row,
+       that other row is the same charge recorded twice. Merge them, keep the
+       file's id so future corrections keep matching, and say so plainly in the
+       dialog — this is the only path in the whole importer that removes a row,
+       and it never runs unconfirmed. */
+    const superseded = [];
+    updates.forEach(u => {
+      const k = keyOf(u.to);
+      S.forEach(e => {
+        if(e.id === u.from.id) return;                 // the row being updated
+        if(claimed.has(e.id)) return;                  // spoken for by its own id
+        if(keyOf(e) === k && superseded.indexOf(e) < 0) superseded.push(e);
+      });
+    });
+    const supIds = new Set(superseded.map(e => e.id));
+
     // A row about to be replaced must not also block a genuinely new import.
-    const existKeys = new Set(S.filter(e => !claimed.has(e.id)).map(keyOf));
+    const existKeys = new Set(S.filter(e => !claimed.has(e.id) && !supIds.has(e.id)).map(keyOf));
 
     const fresh = [];
     rest.forEach(e => {
@@ -1315,17 +1338,25 @@ function importJSON(inp){
       ` • ${u.from.date} ${fmt(u.from.gross,u.from.cur)}  →  ${u.to.date} ${fmt(u.to.gross,u.to.cur)}   ${u.to.desc||u.from.desc}`).join("\n");
     const upMore = updates.length>6 ? `\n … and ${updates.length-6} more` : "";
 
+    const supLines = superseded.slice(0,6).map(e =>
+      ` • ${e.date} ${fmt(e.gross,e.cur)}  ${e.desc}`).join("\n");
+    const supMore = superseded.length>6 ? `\n … and ${superseded.length-6} more` : "";
+
     const parts = [];
     if(fresh.length)   parts.push(`add ${fresh.length} new ${fresh.length===1?"entry":"entries"}`);
     if(updates.length) parts.push(`replace ${updates.length} corrected ${updates.length===1?"entry":"entries"}`);
+    if(superseded.length) parts.push(`merge ${superseded.length} duplicate ${superseded.length===1?"row":"rows"}`);
 
     const body =
       (fresh.length   ? `\nNEW:\n${preview}${more}\n` : "") +
-      (updates.length ? `\nCORRECTED (the old version is replaced, not duplicated):\n${upLines}${upMore}\n` : "");
+      (updates.length ? `\nCORRECTED (the old version is replaced, not duplicated):\n${upLines}${upMore}\n` : "") +
+      (superseded.length ? `\nDUPLICATE — REMOVED (already present under another id; keeping one copy):\n${supLines}${supMore}\n` : "");
 
-    const guarantee = updates.length
-      ? "Only the listed corrected entries are modified. Nothing is deleted."
-      : "Nothing existing is modified or deleted.";
+    const guarantee = superseded.length
+      ? "The duplicate rows listed above are REMOVED. Nothing else is deleted.\nExport first if you want a backup."
+      : updates.length
+        ? "Only the listed corrected entries are modified. Nothing is deleted."
+        : "Nothing existing is modified or deleted.";
 
     if(!confirm(`Import will ${parts.join(" and ")}.${src}\n${skipped} already present, skipped.\n${body}\n${guarantee}${unp}`)){
       inp.value=""; return;
@@ -1335,6 +1366,7 @@ function importJSON(inp){
       const i = S.findIndex(x=>x.id===u.from.id);
       if(i>=0) S[i] = normRow(u.to, u.from.id);
     });
+    if(supIds.size) S = S.filter(e => !supIds.has(e.id));
 
     let n=0;
     fresh.forEach(e=>{
@@ -1342,7 +1374,8 @@ function importJSON(inp){
     });
     save(); render(); tabTo("entries");
     autoResolve();
-    toast(`Added ${fresh.length}, replaced ${updates.length}, skipped ${skipped}`);
+    toast(`Added ${fresh.length}, replaced ${updates.length}`
+      + (supIds.size ? `, merged ${supIds.size}` : "") + `, skipped ${skipped}`);
     inp.value="";
   };
   r.readAsText(f);
