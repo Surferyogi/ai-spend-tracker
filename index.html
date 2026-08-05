@@ -118,6 +118,10 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 .dnum{color:var(--tx3);width:22px;text-align:right;font-variant-numeric:tabular-nums}
 .dsrc{font-size:10.5px;color:var(--tx3);margin-top:2px;line-height:1.45}
 .dconv{font-size:10.5px;color:var(--tx3);margin-top:2px}
+.bar.clik{cursor:pointer;border-radius:6px;padding:2px 4px;margin:0 -4px}
+.bar.clik:hover{background:#1c212b}
+.bar.clik.openrow{background:#1c212b}
+.dtltable tfoot td{padding-top:8px;border-top:1px solid #232833}
 @media(max-width:560px){ .dtlbox{padding-left:10px} .dtltable{font-size:11.5px} }
 @media(max-width:560px){
   .bar{grid-template-columns:82px 1fr 84px;font-size:11.5px}
@@ -132,7 +136,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 <header>
   <div>
     <h1>AI Spend Tracker</h1>
-    <div class="ver" id="ver">v2026:07:31-01:54</div>
+    <div class="ver" id="ver">v2026:08:05-12:17</div>
   </div>
   <div class="row">
     <button class="btn sm" onclick="exportJSON()">Export</button>
@@ -140,9 +144,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
     <input type="file" id="imp" accept=".json" style="display:none" onchange="importJSON(this)">
   </div>
 </header>
-<div class="sub">Historical + ongoing AI cost tracking. Every total is in SGD. Foreign charges keep their original amount and convert at the rate on their own payment date.</div>
-
-<div class="fxbar" id="fxbar"></div>
+<div class="sub">Historical + ongoing AI cost tracking. Every total is in SGD. Foreign charges keep their original amount on the row.</div>
 
 <div class="cards" id="cards"></div>
 
@@ -226,7 +228,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
       <div><label>Date</label><input type="date" id="fDate"></div>
       <div><label>Vendor</label><input id="fVend" list="vendors" placeholder="Vendor"><datalist id="vendors"></datalist></div>
       <div><label>Category</label><select id="fCat">
-        <option>Subscription</option><option>Usage credits</option><option>API credits</option><option>Infrastructure</option><option>Refund</option><option>Other</option>
+        <option>Subscription</option><option>Usage credits</option><option>API credits</option><option>Infrastructure</option><option>Free tier</option><option>Refund</option><option>Other</option>
       </select></div>
       <div><label>Currency</label><select id="fCur"></select></div>
       <div><label>Gross amount (incl. tax)</label><input type="number" step="0.01" id="fGross" placeholder="0.00"></div>
@@ -293,7 +295,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 
 <script>
 "use strict";
-const VERSION = "v2026:07:31-01:54";
+const VERSION = "v2026:08:05-12:17";
 const KEY = "ai-spend-tracker-v1";
 
 /* ---------- seeded data: every figure below was read off a receipt or a console page ---------- */
@@ -335,7 +337,7 @@ function sum(arr,f){ return arr.reduce((a,b)=>a+f(b),0); }
 function round2(n){ return Math.round(n*100)/100; }
 function round4(n){ return Math.round(n*10000)/10000; }
 
-const CATCOL = {"Subscription":"#7aa2f7","Usage credits":"#e8975a","API credits":"#9ece6a","Infrastructure":"#b48ead","Refund":"#e2695f","Other":"#8b93a5"};
+const CATCOL = {"Subscription":"#7aa2f7","Usage credits":"#e8975a","API credits":"#9ece6a","Infrastructure":"#b48ead","Free tier":"#5ec89a","Refund":"#e2695f","Other":"#8b93a5"};
 
 /* ---------- FX: rate is fixed at the payment date ----------
    A charge is converted at the rate that applied ON THE DAY IT WAS PAID, and
@@ -375,12 +377,31 @@ function fxFor(e){
   return null;
 }
 function rateOf(e){ const f = fxFor(e); return f ? f.rate : null; }
-function sgOf(e){ const r = rateOf(e); return r === null ? null : round2(e.gross * r); }
+function sgOf(e){
+  // A zero charge converts to zero in any currency. Without this guard a free-tier
+  // row with no rate on file would be reported as an unrated gap, which is noise.
+  if(!e.gross && !e.tax) return 0;
+  const r = rateOf(e); return r === null ? null : round2(e.gross * r);
+}
 function taxSgOf(e){ const r = rateOf(e); return r === null ? null : round2((e.tax||0) * r); }
 function sumSgd(arr){ return round2(arr.reduce((a,e)=>a + (sgOf(e) === null ? 0 : sgOf(e)), 0)); }
-function noRate(arr){ return arr.filter(e => fxFor(e) === null); }
+function noRate(arr){ return arr.filter(e => (e.gross || e.tax) && fxFor(e) === null); }
 function foreignCurs(){ return [...new Set(S.map(e=>e.cur))].filter(c=>c!=="SGD").sort(); }
 function foreignEntries(){ return S.filter(e=>e.cur!=="SGD"); }
+
+/* The conversion note under a foreign amount. Kept in one place because three
+   views render it, and the zero-charge case is easy to get wrong: sgOf() returns
+   0 for a free row while fxFor() returns null, so testing sgOf alone and then
+   reading .rate off null throws. */
+function convNote(e){
+  if(e.cur === "SGD") return "";
+  if(!e.gross && !e.tax) return '<div class="dconv">no charge</div>';
+  const sg = sgOf(e);
+  // Deliberately no rate or rate-date shown. An unresolved rate is still called
+  // out, because that changes the total rather than merely the presentation.
+  if(sg === null) return '<div class="dconv"><span class="fxbad">rate pending</span></div>';
+  return '<div class="dconv">≈ ' + fmt(sg,"SGD") + '</div>';
+}
 
 /* ---- resolving rates from the ECB feed, one call per distinct currency+date ---- */
 let FX_BUSY = false;
@@ -404,12 +425,12 @@ async function fetchRateOn(cur, date){
   }
 }
 
-async function resolveRates(force){
+async function resolveRates(force, silent){
   if(FX_BUSY) return;
   const targets = foreignEntries().filter(e => force || fxFor(e) === null);
   if(!targets.length){
-    toast(foreignEntries().length ? "Every foreign charge already has its payment-date rate" : "No foreign charges to convert");
-    renderFx(); return;
+    if(!silent) toast(foreignEntries().length ? "Every foreign charge already has its payment-date rate" : "No foreign charges to convert");
+    return;
   }
   FX_BUSY = true; renderFx();
 
@@ -431,7 +452,19 @@ async function resolveRates(force){
   FX_BUSY = false;
   if(done) save();
   render();
-  toast(failed ? `${done} resolved, ${failed} could not be fetched` : `${done} ${done===1?"charge":"charges"} locked to its payment-date rate`);
+  // Silent runs stay quiet on success. A failure still speaks up: an unresolved
+  // charge is excluded from the total, and that must never pass unnoticed.
+  if(failed) toast(`${failed} ${failed===1?"charge":"charges"} could not be converted — still excluded from totals`);
+  else if(!silent) toast(`${done} ${done===1?"charge":"charges"} locked to its payment-date rate`);
+}
+
+/* Resolve anything unrated, quietly. Safe to call repeatedly: it no-ops when
+   there is nothing outstanding, and never runs two fetches at once. */
+function autoResolve(){
+  if(FX_BUSY) return;
+  if(!noRate(S).length) return;
+  if(navigator.onLine === false) return;
+  setTimeout(()=>resolveRates(false, true), 250);
 }
 
 function clearStoredRates(){
@@ -456,30 +489,11 @@ function setRateManually(){
   save(); render(); toast(`1 ${e.cur} = S$${round4(n)} on ${dayName(e.date)} (manual)`);
 }
 
-function renderFx(){
-  const el = document.getElementById("fxbar");
-  const fe = foreignEntries();
-  if(!fe.length){
-    el.innerHTML = `<span class="fxnote">Every entry is in SGD — no conversion applied.</span>`;
-    return;
-  }
-  const missing = noRate(S);
-  const shown = [...new Set(fe.filter(e=>fxFor(e)).map(e=>{
-    const f = fxFor(e);
-    return `1 ${e.cur} = S$${f.rate.toFixed(4)} <span class="fxsrc">on ${dayName(f.on)}</span>`;
-  }))].slice(0,4).join(" &nbsp; ");
-
-  el.innerHTML = `
-    <div class="fxline">${FX_BUSY ? "fetching payment-date rates…" : (shown || '<span class="fxbad">no rates resolved</span>')}
-      ${missing.length ? `<span class="fxbad" style="font-size:11.5px;margin-left:10px">${missing.length} unrated</span>` : ""}</div>
-    <div class="fxnote">Each foreign charge is converted at the rate on <b>its own payment date</b> and that rate is stored, so past totals never shift. ECB publishes on business days, so a weekend or holiday charge uses the last rate published before it — the date shown is the one actually used.</div>
-    <span class="fxbtns">
-      <button class="btn sm" onclick="resolveRates(false)"${FX_BUSY?" disabled":""}>${FX_BUSY?"Resolving…":"Resolve missing"}</button>
-      <button class="btn sm" onclick="resolveRates(true)"${FX_BUSY?" disabled":""}>Re-resolve all</button>
-      <button class="btn sm" onclick="setRateManually()">Set manually</button>
-      <button class="btn sm danger" onclick="clearStoredRates()">Clear stored</button>
-    </span>`;
-}
+/* The FX bar was removed at CK's request — rates resolve automatically and the
+   mechanics are not displayed. The data is still stored on every entry
+   (fxRate / fxDate / fxSrc) and travels in the JSON export, so a conversion can
+   always be audited even though nothing on screen shows it. */
+function renderFx(){}
 
 function filtered(){
   const v = document.getElementById("fVendor").value;
@@ -515,7 +529,7 @@ function render(){
   document.getElementById("cards").innerHTML = `
     <div class="card"><div class="lbl">Total${anyAssumed?" — confirmed":""} · SGD</div>
       <div class="val sgd">${fmt(anyAssumed ? totV : totAll,"SGD")}</div>
-      <div class="note">converted at payment-date rates · since ${since}</div></div>
+      <div class="note">all currencies included · since ${since}</div></div>
 
     ${anyAssumed
       ? `<div class="card"><div class="lbl">Total incl. assumed · SGD</div><div class="val sgd">${fmt(totAll,"SGD")}</div>
@@ -525,7 +539,7 @@ function render(){
 
     <div class="card"><div class="lbl">Foreign, converted</div>
       <div class="val usd">${fx.length ? fx.map(x=>fmt(x.orig,x.c)).join(" + ") : "—"}</div>
-      <div class="note">${fx.length ? "= " + fmt(sum(fx,x=>x.sgd),"SGD") + " at payment-date rates" : "no foreign-currency charges"}</div></div>
+      <div class="note">${fx.length ? "= " + fmt(sum(fx,x=>x.sgd),"SGD") + " of the total" : "no foreign-currency charges"}</div></div>
 
     <div class="card"><div class="lbl">SGD per day</div><div class="val">${fmt(totAll/days,"SGD")}</div>
       <div class="note">over ${days} days${anyAssumed?` · confirmed only ${fmt(totV/days,"SGD")}`:""}</div></div>`;
@@ -577,6 +591,38 @@ function renderVendors(){
     <div class="legend"><span>${rows.map(r=>`${esc(r.v)}: ${r.n} ${r.n===1?"entry":"entries"}${r.unv?`, ${r.unv} assumed`:""}`).join(" &nbsp;·&nbsp; ")}</span></div>`;
 }
 
+/* ---------- monthly bar drill-down ---------- */
+const openMonths = new Set();
+function toggleMonth(m){
+  if(openMonths.has(m)) openMonths.delete(m); else openMonths.add(m);
+  renderMonthly();
+}
+
+function monthDetail(m){
+  const es = S.filter(e=>ym(e.date)===m).sort((a,b)=>a.date.localeCompare(b.date));
+  if(!es.length) return `<div class="dtlbox"><div class="empty">Nothing charged in ${monthName(m)}.</div></div>`;
+  const rows = es.map((e,i)=>{
+    return `<tr class="dtl">
+      <td class="dnum">${i+1}</td>
+      <td style="white-space:nowrap">${dayName(e.date)}</td>
+      <td><span class="dot" style="background:${CATCOL[e.cat]||"#888"}"></span>${esc(e.cat)}</td>
+      <td style="color:var(--tx2)">${esc(e.vendor)}</td>
+      <td>${esc(e.desc)}<div class="dsrc">${esc(e.src||"no source recorded")}</div></td>
+      <td class="num ${e.gross<0?"neg":""}">${fmt(e.gross,e.cur)}
+        ${convNote(e)}</td>
+      <td><button class="btn sm" onclick="event.stopPropagation();editEntry('${esc(e.id)}')">Edit</button></td>
+    </tr>`;
+  }).join("");
+  return `<div class="dtlbox" onclick="event.stopPropagation()">
+    <table class="dtltable">
+      <thead><tr><th></th><th>Date</th><th>Category</th><th>Vendor</th>
+        <th>Description &amp; source</th><th class="num">Charged</th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td colspan="5"><b>${es.length} ${es.length===1?"charge":"charges"} in ${monthName(m)}</b></td>
+        <td class="num"><b>${fmt(sumSgd(es),"SGD")}</b></td><td></td></tr></tfoot>
+    </table></div>`;
+}
+
 /* ---------- category table, with per-category drill-down ---------- */
 const openCats = new Set();
 function toggleCat(c){
@@ -587,7 +633,6 @@ function toggleCat(c){
 
 function catDetail(es){
   const rows = es.slice().sort((a,b)=>a.date.localeCompare(b.date)).map((e,i)=>{
-    const sg = sgOf(e), foreign = e.cur !== "SGD";
     return `<tr class="dtl">
       <td class="dnum">${i+1}</td>
       <td style="white-space:nowrap">${dayName(e.date)}</td>
@@ -595,9 +640,7 @@ function catDetail(es){
       <td>${esc(e.desc)}
         <div class="dsrc">${esc(e.src||"no source recorded")}</div></td>
       <td class="num ${e.gross<0?"neg":""}">${fmt(e.gross,e.cur)}
-        ${foreign?`<div class="dconv">${sg===null
-            ? '<span class="fxbad">no rate for this date</span>'
-            : "≈ "+fmt(sg,"SGD")+'<br><span style="opacity:.75">@ '+fxFor(e).rate.toFixed(4)+" on "+dayName(fxFor(e).on)+"</span>"}</div>`:""}</td>
+        ${convNote(e)}</td>
       <td class="num" style="color:var(--tx3)">${e.tax?fmt(e.tax,e.cur):"—"}</td>
       <td>${e.verified?'<span class="pill v">verified</span>':'<span class="pill u">assumed</span>'}${e.recurring?' <span class="pill r">recurring</span>':''}</td>
       <td><button class="btn sm" onclick="editEntry('${esc(e.id)}')">Edit</button></td>
@@ -692,11 +735,16 @@ function renderMonthly(){
      <td></td></tr></tfoot>`;
 
   const max=Math.max(...data.map(d=>Math.max(0,d.sgd)),1);
-  document.getElementById("monBars").innerHTML = data.map(d=>`
-    <div class="bar"><div style="color:var(--tx2)">${monthName(d.m).split(" ")[0]}</div>
+  document.getElementById("monBars").innerHTML = data.map(d=>{
+    const open = openMonths.has(d.m);
+    return `<div class="bar clik${open?" openrow":""}" onclick="toggleMonth('${d.m}')"
+              title="Click to list every charge in ${monthName(d.m)}">
+      <div style="color:var(--tx2)"><span class="caret">${open?"▾":"▸"}</span>${monthName(d.m).split(" ")[0]}</div>
       <div class="track">${cats.filter(c=>d.by[c]>0).map(c=>
         `<div class="seg" style="width:${d.by[c]/max*100}%;background:${CATCOL[c]||"#888"}" title="${esc(c)}: ${fmt(d.by[c],"SGD")}"></div>`).join("")}</div>
-      <div class="amt">${fmt(d.sgd,"SGD")}</div></div>`).join("");
+      <div class="amt">${fmt(d.sgd,"SGD")}</div></div>`
+      + (open ? monthDetail(d.m) : "");
+  }).join("");
   document.getElementById("monLegend").innerHTML = cats.map(c=>
     `<span><span class="dot" style="background:${CATCOL[c]||"#888"}"></span>${esc(c)}</span>`).join("");
 }
@@ -737,15 +785,12 @@ function renderEntries(){
   document.getElementById("entTable").innerHTML = `
    <thead><tr><th>Date</th><th>Vendor</th><th>Description</th><th class="num">Charged</th><th class="num">Tax</th><th></th><th></th></tr></thead>
    <tbody>${es.map(e=>{
-     const sg = sgOf(e), foreign = e.cur !== "SGD";
-     return `<tr>
+      return `<tr>
      <td style="white-space:nowrap">${new Date(e.date).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"2-digit"})}</td>
      <td style="color:var(--tx2)">${esc(e.vendor)}</td>
      <td>${esc(e.desc)}<div style="font-size:11px;color:var(--tx3);margin-top:2px">${esc(e.src||"")}</div></td>
      <td class="num ${e.gross<0?"neg":""}">${fmt(e.gross,e.cur)}
-       ${foreign?`<div class="dconv">${sg===null
-           ? '<span class="fxbad">no rate for this date</span>'
-           : "≈ "+fmt(sg,"SGD")+'<br><span style="opacity:.75">@ '+fxFor(e).rate.toFixed(4)+" on "+dayName(fxFor(e).on)+"</span>"}</div>`:""}</td>
+       ${convNote(e)}</td>
      <td class="num" style="color:var(--tx3)">${e.tax?fmt(e.tax,e.cur):"—"}</td>
      <td>${e.verified?'<span class="pill v">verified</span>':'<span class="pill u">assumed</span>'}${e.recurring?' <span class="pill r">recurring</span>':''}</td>
      <td style="white-space:nowrap">
@@ -786,7 +831,7 @@ function saveEntry(){
   }
 
   if(i>=0) S[i]=o; else S.push(o);
-  save(); resetForm(); render(); toast(i>=0?"Entry updated":"Entry added");
+  save(); resetForm(); render(); autoResolve(); toast(i>=0?"Entry updated":"Entry added");
 }
 function editEntry(id){
   const e=S.find(x=>x.id===id); if(!e) return;
@@ -916,6 +961,7 @@ function importJSON(inp){
       });
     });
     save(); render(); tabTo("entries");
+    autoResolve();
     toast(`Added ${fresh.length}, skipped ${skipped}`);
     inp.value="";
   };
@@ -930,7 +976,7 @@ function replaceAll(inp){
       const p=JSON.parse(r.result); const e=Array.isArray(p)?p:p.entries;
       if(!Array.isArray(e)) throw 0;
       if(!confirm(`Replace ALL ${S.length} existing entries with ${e.length} from this file?\n\nManual entries and verification ticks will be lost. Export first if unsure.`)){ inp.value=""; return; }
-      S=e; save(); render(); toast(`Replaced with ${e.length} entries`);
+      S=e; save(); render(); autoResolve(); toast(`Replaced with ${e.length} entries`);
     }catch(err){ toast("Could not read that file"); }
     inp.value=""; };
   r.readAsText(f);
@@ -958,15 +1004,9 @@ if("serviceWorker" in navigator){
 
 resetForm();
 
-/* Fill in any missing payment-date rates on launch. Silent: a failure must not
-   nag — unrated rows are named in the banner and excluded from totals, never
-   quietly counted as zero. */
-(function(){
-  if(!foreignEntries().length) return;
-  if(!noRate(S).length) return;                 // every foreign charge already locked
-  if(navigator.onLine === false){ renderFx(); return; }
-  setTimeout(()=>resolveRates(false), 400);
-})();
+/* Rates resolve on their own — on launch, after an import, and after an edit.
+   Nothing is shown while it happens. */
+autoResolve();
 
 document.getElementById("projTo").value = new Date(Date.now()+15768e7).toISOString().slice(0,7);
 render();
