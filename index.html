@@ -95,6 +95,16 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:10px 16px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s;z-index:99}
 .toast.on{opacity:1}
 .empty{color:var(--tx3);font-size:13px;text-align:center;padding:22px}
+.ckcount{font-size:11px;color:var(--tx3);font-weight:400;text-transform:none;letter-spacing:0;margin-left:6px}
+.ck{border-left:3px solid var(--line);background:#141821;border-radius:0 8px 8px 0;padding:10px 13px;margin-bottom:8px}
+.ck:last-child{margin-bottom:0}
+.ck.warn{border-left-color:var(--warn)}
+.ck.info{border-left-color:var(--info)}
+.ck.ok{border-left-color:var(--ok)}
+.ck.bad{border-left-color:var(--bad)}
+.ck .ckt{font-size:13px;color:var(--tx);font-weight:600}
+.ck .ckd{font-size:12px;color:var(--tx2);margin-top:3px;line-height:1.55}
+.ck .ckrows{font-size:11.5px;color:var(--tx3);margin-top:6px;font-variant-numeric:tabular-nums;line-height:1.7}
 
 .fxbar{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:11px 13px;margin-bottom:14px;
   display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center}
@@ -136,7 +146,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 <header>
   <div>
     <h1>AI Spend Tracker</h1>
-    <div class="ver" id="ver">v2026:08:05-12:17</div>
+    <div class="ver" id="ver">v2026:08:05-12:34</div>
   </div>
   <div class="row">
     <button class="btn sm" onclick="exportJSON()">Export</button>
@@ -158,7 +168,10 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 
 <!-- OVERVIEW -->
 <section id="overview" class="on">
-  <div class="note-box" id="unverifiedNote"></div>
+  <div class="panel" id="checksPanel">
+    <h2>Billing checks <span id="checksCount" class="ckcount"></span></h2>
+    <div id="checks"></div>
+  </div>
 
   <div class="panel">
     <h2>By vendor</h2>
@@ -295,7 +308,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 
 <script>
 "use strict";
-const VERSION = "v2026:08:05-12:17";
+const VERSION = "v2026:08:05-12:34";
 const KEY = "ai-spend-tracker-v1";
 
 /* ---------- seeded data: every figure below was read off a receipt or a console page ---------- */
@@ -501,6 +514,164 @@ function filtered(){
   return S.filter(e => (!v || e.vendor===v) && (!q || (q==="v"?e.verified:!e.verified)));
 }
 
+/* ---------- billing checks ----------
+   Everything here answers one question: does this ledger contain something that
+   looks wrong? A finding is never a verdict — it points at rows and says why they
+   drew attention, so the judgement stays with CK. Silence is also a claim, so the
+   panel says explicitly when nothing was found. */
+
+const CHECK_SKIP = ["Usage credits", "Free tier"];   // legitimately repeat within a month
+function itemName(e){ return String(e.desc||"").split(" — ")[0].trim(); }
+function seriesKey(e){ return e.vendor + "|" + itemName(e); }
+function monthsBetween(a,b){
+  const [ay,am]=a.split("-").map(Number), [by,bm]=b.split("-").map(Number);
+  return (by-ay)*12 + (bm-am);
+}
+function rowLine(e){
+  return `${dayName(e.date)} · ${esc(e.vendor)} · ${fmt(e.gross,e.cur)} · ${esc(e.desc)}`;
+}
+
+function runChecks(){
+  const out = [];
+  const today = new Date().toISOString().slice(0,10);
+  const billable = S.filter(e => CHECK_SKIP.indexOf(e.cat) < 0);
+
+  // group into series: same vendor, same item (period suffixes stripped)
+  const series = {};
+  billable.forEach(e => { (series[seriesKey(e)] = series[seriesKey(e)] || []).push(e); });
+  Object.values(series).forEach(a => a.sort((x,y)=>x.date.localeCompare(y.date)));
+
+  // 1. the same subscription charged more than once in a calendar month
+  Object.entries(series).forEach(([k, es]) => {
+    const byMonth = {};
+    es.forEach(e => { (byMonth[ym(e.date)] = byMonth[ym(e.date)] || []).push(e); });
+    Object.entries(byMonth).forEach(([m, rows]) => {
+      if(rows.length < 2) return;
+      const refund = S.some(e => e.cat === "Refund" && e.vendor === rows[0].vendor && ym(e.date) === m);
+      out.push({
+        level: refund ? "info" : "warn",
+        title: `${rows.length} × ${esc(itemName(rows[0]))} charged in ${monthName(m)}`,
+        detail: refund
+          ? "A refund for this vendor lands in the same month, so this is most likely a plan change rather than a double charge. Worth a glance, not an alarm."
+          : "A monthly item billed more than once in one month. Check for a duplicate charge, or a mid-cycle plan change that has not been refunded.",
+        rows
+      });
+    });
+  });
+
+  // 2. price moved between consecutive charges of the same item
+  Object.values(series).forEach(es => {
+    for(let i=1;i<es.length;i++){
+      const a=es[i-1], b=es[i];
+      if(a.cur !== b.cur || a.gross === b.gross || !a.gross || !b.gross) continue;
+      const d = round2(b.gross - a.gross), pct = Math.round(d / Math.abs(a.gross) * 1000)/10;
+      out.push({
+        level: "info",
+        title: `${esc(itemName(b))} changed from ${fmt(a.gross,a.cur)} to ${fmt(b.gross,b.cur)}`,
+        detail: `${d>0?"Up":"Down"} ${fmt(Math.abs(d),b.cur)} (${d>0?"+":""}${pct}%) between ${dayName(a.date)} and ${dayName(b.date)}. Confirm the new price is intended — nothing here re-checks it automatically.`,
+        rows: [a,b]
+      });
+    }
+  });
+
+  // 3. a month missing from an otherwise monthly series
+  Object.values(series).forEach(es => {
+    if(es.length < 3) return;
+    const ms = [...new Set(es.map(e=>ym(e.date)))].sort();
+    const gaps = [];
+    for(let i=1;i<ms.length;i++){
+      const n = monthsBetween(ms[i-1], ms[i]);
+      for(let g=1; g<n; g++){
+        let [y,mo]=ms[i-1].split("-").map(Number); mo+=g; while(mo>12){mo-=12;y++;}
+        gaps.push(`${y}-${String(mo).padStart(2,"0")}`);
+      }
+    }
+    if(gaps.length) out.push({
+      level: "warn",
+      title: `${esc(itemName(es[0]))} has no charge in ${gaps.map(monthName).join(", ")}`,
+      detail: "This item bills monthly elsewhere in the ledger. Either a charge is missing from the tracker, or the subscription was paused.",
+      rows: es.slice(-3)
+    });
+  });
+
+  // 4. a recurring item with no charge for over 40 days
+  S.filter(e=>e.recurring).forEach(e => {
+    const days = Math.round((new Date(today) - new Date(e.date))/864e5);
+    if(days > 40) out.push({
+      level: "warn",
+      title: `${esc(itemName(e))} last billed ${days} days ago`,
+      detail: "Marked recurring but nothing newer is recorded. Either the renewal has not been added, or the subscription ended.",
+      rows: [e]
+    });
+  });
+
+  // 5. charges excluded from every total because no rate resolved
+  const nr = noRate(S);
+  if(nr.length) out.push({
+    level: "bad",
+    title: `${nr.length} ${nr.length===1?"charge is":"charges are"} excluded from every total`,
+    detail: `No exchange rate has resolved for ${[...new Set(nr.map(e=>e.cur))].join(", ")} on ${nr.length===1?"its payment date":"their payment dates"}. Totals understate spend until this clears. Rates retry automatically; the Rate field on each entry is the manual override.`,
+    rows: nr
+  });
+
+  // 6. rows not backed by a receipt
+  const un = S.filter(e=>!e.verified);
+  if(un.length) out.push({
+    level: "warn",
+    title: `${un.length} ${un.length===1?"entry is":"entries are"} assumed, not receipt-verified`,
+    detail: "Projected at the last known price. Confirm against the vendor and tick “Receipt verified”.",
+    rows: un
+  });
+
+  // 7. a month well above the others
+  const ms = months();
+  if(ms.length >= 3){
+    const tot = ms.map(m => ({m, v: sumSgd(S.filter(e=>ym(e.date)===m))}));
+    const sorted = tot.map(t=>t.v).slice().sort((a,b)=>a-b);
+    const med = sorted[Math.floor(sorted.length/2)];
+    tot.forEach(t => {
+      if(med > 0 && t.v >= med * 1.75) out.push({
+        level: "info",
+        title: `${monthName(t.m)} ran ${fmt(t.v,"SGD")}, well above the ${fmt(med,"SGD")} median`,
+        detail: "Not necessarily wrong — but the largest months are where an unnoticed charge hides. Open that month's bar to see every line.",
+        rows: []
+      });
+    });
+  }
+
+  // 8. two rows claiming to be the same receipt
+  const seen = {};
+  S.forEach(e => { const k = e.key || keyOf(e); (seen[k] = seen[k] || []).push(e); });
+  Object.values(seen).forEach(a => { if(a.length > 1) out.push({
+    level: "bad",
+    title: "Two entries share one receipt reference",
+    detail: "Almost certainly a double import. Delete one.",
+    rows: a
+  });});
+
+  const order = {bad:0, warn:1, info:2};
+  out.sort((a,b)=> order[a.level] - order[b.level]);
+  return out;
+}
+
+function renderChecks(){
+  const f = runChecks();
+  const el = document.getElementById("checks");
+  const n = f.filter(x=>x.level==="bad"||x.level==="warn").length;
+  document.getElementById("checksCount").textContent =
+    f.length ? `${n ? n + " needing attention · " : ""}${f.length} finding${f.length===1?"":"s"}` : "";
+  if(!f.length){
+    el.innerHTML = `<div class="ck ok"><div class="ckt">Nothing looks wrong.</div>
+      <div class="ckd">Checked for repeated monthly charges, price changes, missing renewals, stale subscriptions, unconverted charges, unverified rows, outlier months and duplicate receipts across all ${S.length} entries.</div></div>`;
+    return;
+  }
+  el.innerHTML = f.map(x => `<div class="ck ${x.level}">
+      <div class="ckt">${x.title}</div>
+      <div class="ckd">${x.detail}</div>
+      ${x.rows && x.rows.length ? `<div class="ckrows">${x.rows.map(rowLine).join("<br>")}</div>` : ""}
+    </div>`).join("");
+}
+
 /* ---------- render ---------- */
 function render(){
   document.getElementById("ver").textContent = VERSION;
@@ -544,18 +715,7 @@ function render(){
     <div class="card"><div class="lbl">SGD per day</div><div class="val">${fmt(totAll/days,"SGD")}</div>
       <div class="note">over ${days} days${anyAssumed?` · confirmed only ${fmt(totV/days,"SGD")}`:""}</div></div>`;
 
-  const nU = S.filter(e=>!e.verified).length;
-  const stated = S.filter(e=>e.verified && /Confirmed constant|stated fixed price/i.test(e.src||""));
-  const statedSum = sumSgd(stated);
-  const statedNote = stated.length
-    ? ` <b>${stated.length} of them rest on your word, not a receipt:</b> ${stated.length===1?"it is":"they are"} recorded at a stated fixed price (${fmt(statedSum,"SGD")}) because you confirmed the figure — no receipt email exists to check against. If the price ever changes, nothing here will catch it.`
-    : "";
-  const rateWarn = missing.length
-    ? ` <b class="fxbad">${missing.length} ${missing.length===1?"entry has":"entries have"} no exchange rate</b> (${[...new Set(missing.map(e=>e.cur))].join(", ")}) for ${missing.length===1?"its payment date":"their payment dates"} and ${missing.length===1?"is":"are"} excluded from every SGD total. Press "Resolve missing", or set one manually.`
-    : "";
-  document.getElementById("unverifiedNote").innerHTML = (nU
-    ? `<b>${nU} ${nU===1?"entry is":"entries are"} assumed, not confirmed.</b> They are projected at the last known price and total ${fmt(totAll-totV,"SGD")}. Confirm the real figure, then tick "Receipt verified" on each.${statedNote}`
-    : `<b>Every entry is confirmed.</b>${statedNote}`) + rateWarn;
+  renderChecks();
 
   renderVendors(); renderCat(); renderRunRate(days, totV, totAll);
   renderMonthly(); renderApi(); renderEntries();
