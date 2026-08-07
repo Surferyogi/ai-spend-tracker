@@ -169,7 +169,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 <header>
   <div>
     <h1>AI Spend Tracker</h1>
-    <div class="ver" id="ver">v2026:08:05-22:18</div>
+    <div class="ver" id="ver">v2026:08:07-07:49</div>
   </div>
   <div class="row">
     <button class="btn sm" onclick="exportJSON()">Export</button>
@@ -338,7 +338,7 @@ tr.dtlwrap td{background:#12151c;border-bottom:1px solid var(--line)}
 
 <script>
 "use strict";
-const VERSION = "v2026:08:05-22:18";
+const VERSION = "v2026:08:07-07:49";
 const KEY = "ai-spend-tracker-v1";
 
 /* ---------- seeded data: every figure below was read off a receipt or a console page ---------- */
@@ -718,6 +718,55 @@ function runChecks(){
     rows: a
   });});
 
+  /* 9. ONE INVOICE, TWO VENDORS.
+     Check 8 keys on `key || keyOf(e)`, and keyOf falls back to a signature that
+     INCLUDES the vendor — so the same receipt filed under two different vendor
+     names slips straight past it. That is exactly the overlap worth watching
+     when one company is billed through two routes (direct, and via an app
+     store): the two bars must not both contain the same invoice.
+
+     A shared order number is not automatically wrong. One Apple order can
+     legitimately bundle two different apps — a Claude charge and an xAI charge
+     on one invoice is a real thing that happened here. What is never right is
+     the same identifier against the same date AND amount twice: that is one
+     charge entered twice. So the two cases are separated rather than lumped. */
+  const byIdent = {};
+  S.forEach(e => {
+    const blob = (e.ref || "") + " " + (e.key || "");
+    (blob.match(/[A-Za-z0-9][A-Za-z0-9\-]{3,}/g) || [])
+      .filter(t => /\d/.test(t))                       // identifiers carry digits
+      .forEach(t => { (byIdent[t] = byIdent[t] || []).push(e); });
+  });
+  const identSeen = new Set();
+  Object.keys(byIdent).forEach(t => {
+    const a = byIdent[t].filter((e,i,arr) => arr.indexOf(e) === i);
+    if(a.length < 2) return;
+    const sigKey = a.map(e => e.id).sort().join("|");
+    if(identSeen.has(sigKey)) return;                  // one finding per row set
+    identSeen.add(sigKey);
+
+    const sig = e => [e.date, e.cur, Number(e.gross).toFixed(2)].join("|");
+    const sigs = a.map(sig);
+    const dupe = sigs.some((s,i) => sigs.indexOf(s) !== i);
+    const vendors = [...new Set(a.map(e => e.vendor))];
+
+    if(dupe){
+      out.push({
+        level: "bad",
+        title: `Reference ${esc(t)} is on ${a.length} rows with the same date and amount`,
+        detail: "One charge recorded twice under the same invoice reference. Delete one, or use Data → Merge duplicate rows.",
+        rows: a
+      });
+    } else if(vendors.length > 1){
+      out.push({
+        level: "info",
+        title: `One invoice (${esc(t)}) covers ${vendors.length} vendors`,
+        detail: `${vendors.join(" and ")} appear on the same invoice. Expected when an app store bundles several subscriptions into one order — the amounts differ, so this is a split, not a duplicate. Worth a glance only if you did not expect these two to share a bill.`,
+        rows: a
+      });
+    }
+  });
+
   const order = {bad:0, warn:1, info:2};
   out.sort((a,b)=> order[a.level] - order[b.level]);
   return out;
@@ -872,6 +921,44 @@ function render(){
   document.getElementById("vendors").innerHTML = vs.map(v=>`<option value="${esc(v)}">`).join("");
 }
 
+/* ---------- vendor bar drill-down ----------
+   Same interaction as the monthly bars and the category rows: press a bar, get
+   every charge behind it with its reference and payment method. A total nobody
+   can decompose is a number you have to take on faith. */
+const openVendors = new Set();
+function toggleVendor(v){
+  const k = decodeURIComponent(v);
+  if(openVendors.has(k)) openVendors.delete(k); else openVendors.add(k);
+  renderVendors();
+}
+
+function vendorDetail(v){
+  const es = S.filter(e=>e.vendor===v).sort((a,b)=>a.date.localeCompare(b.date));
+  if(!es.length) return `<div class="dtlbox"><div class="empty">Nothing recorded for ${esc(v)}.</div></div>`;
+  const rows = es.map((e,i)=>`<tr class="dtl">
+      <td class="dnum">${i+1}</td>
+      <td style="white-space:nowrap">${dayName(e.date)}</td>
+      <td><span class="dot" style="background:${CATCOL[e.cat]||"#888"}"></span>${esc(e.cat)}</td>
+      <td>${esc(e.desc)}
+        <div class="dsrc">${[e.ref && "Ref "+esc(e.ref), e.pay && "Paid by "+esc(e.pay)].filter(Boolean).join(" · ") || "no reference recorded"}</div>
+        <div class="dsrc">${esc(e.src||"no source recorded")}</div></td>
+      <td class="num ${e.gross<0?"neg":""}">${fmt(e.gross,e.cur)}${convNote(e)}</td>
+      <td class="num" style="color:var(--tx3)">${e.tax?fmt(e.tax,e.cur):"—"}</td>
+      <td>${e.verified?'<span class="pill v">verified</span>':'<span class="pill u">assumed</span>'}${e.recurring?' <span class="pill r">recurring</span>':''}</td>
+      <td style="white-space:nowrap">
+        <button class="btn sm" onclick="event.stopPropagation();editEntry('${esc(e.id)}')">Edit</button>
+        <button class="btn sm danger" title="Delete this entry" onclick="event.stopPropagation();delEntry('${esc(e.id)}')">×</button></td>
+    </tr>`).join("");
+  return `<div class="dtlbox" onclick="event.stopPropagation()">
+    <table class="dtltable">
+      <thead><tr><th></th><th>Date</th><th>Category</th><th>Description, reference &amp; source</th>
+        <th class="num">Charged</th><th class="num">Tax</th><th></th><th></th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td colspan="4"><b>${es.length} ${es.length===1?"charge":"charges"} from ${esc(v)}</b></td>
+        <td class="num"><b>${fmt(sumSgd(es),"SGD")}</b></td><td colspan="3"></td></tr></tfoot>
+    </table></div>`;
+}
+
 function renderVendors(){
   const vs = [...new Set(S.map(e=>e.vendor))];
   const rows = vs.map(v=>{
@@ -881,12 +968,16 @@ function renderVendors(){
     return { v, sgd:sumSgd(es), n:es.length, unv:es.filter(e=>!e.verified).length, fx };
   }).sort((a,b)=>b.sgd-a.sgd);
   const max = Math.max(...rows.map(r=>Math.abs(r.sgd)),1);
-  document.getElementById("byVendor").innerHTML = `<div class="bars">${rows.map(r=>`
-      <div class="bar">
-        <div style="color:var(--tx2);overflow:hidden;text-overflow:ellipsis;font-size:11px" title="${esc(r.v)}">${esc(r.v)}</div>
+  document.getElementById("byVendor").innerHTML = `<div class="bars">${rows.map(r=>{
+    const open = openVendors.has(r.v);
+    return `<div class="bar clik${open?" openrow":""}" onclick="toggleVendor('${encodeURIComponent(r.v)}')"
+              title="Click to see all ${r.n} ${r.n===1?"charge":"charges"} from ${esc(r.v)}">
+        <div style="color:var(--tx2);overflow:hidden;text-overflow:ellipsis;font-size:11px" title="${esc(r.v)}"><span class="caret">${open?"▾":"▸"}</span>${esc(r.v)}</div>
         <div class="track"><div class="seg" style="width:${Math.abs(r.sgd)/max*100}%;background:${r.sgd<0?"var(--bad)":"var(--sgd)"}"></div></div>
         <div class="amt">${fmt(r.sgd,"SGD")}${r.fx.length?`<div style="font-size:10.5px;color:var(--tx3)">${r.fx.map(x=>fmt(x.orig,x.c)).join(" + ")}</div>`:""}</div>
-      </div>`).join("")}</div>
+      </div>`
+      + (open ? vendorDetail(r.v) : "");
+  }).join("")}</div>
     <div class="legend"><span>${rows.map(r=>`${esc(r.v)}: ${r.n} ${r.n===1?"entry":"entries"}${r.unv?`, ${r.unv} assumed`:""}`).join(" &nbsp;·&nbsp; ")}</span></div>`;
 }
 
